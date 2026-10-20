@@ -1,42 +1,138 @@
 import dayjs from 'dayjs'
-import React from 'react'
-import { Button, Header, Page, useNavigate, useSnackbar } from 'zmp-ui'
+import React, { useState } from 'react'
+import { Header, Icon, Page, useNavigate } from 'zmp-ui'
 
 import { PageContainer } from '@/components'
-import { fmtDate, RoomDay, roomDay, STATE_LABEL, usePms } from '@/modules/pms/pms.store'
+import {
+  CheckInButton,
+  CheckOutButton,
+  CleanButton,
+  DeclareButton,
+  NoShowButton,
+} from '@/modules/pms/components/stay-buttons'
+import { CallButton, Card, Empty, LinkRow, RoleTag, Tag } from '@/modules/pms/components/ui'
+import {
+  arrivalDate,
+  Booking,
+  day,
+  failingFeeds,
+  guestLabel,
+  isStaying,
+  lateDays,
+  overdueDays,
+  Place,
+  placeRooms,
+  Room,
+  roomDay,
+  today,
+  usePms,
+  whenLabel,
+} from '@/modules/pms/pms.store'
 import { PmsTabs } from '@/modules/pms/pms-tabs'
 
 export default function TodayPage() {
-  const { placeName, rooms, bookings } = usePms()
-  const days = rooms.map((r) => roomDay(r, bookings))
-  const count = (...states: RoomDay['state'][]) => days.filter((x) => states.includes(x.state)).length
+  const { places, rooms, bookings } = usePms()
+  const multi = places.length > 1
+  const roomOf = (b: Booking) => rooms.find((r) => r.id === b.room_id)!
+  const placeOf = (r: Room) => places.find((p) => p.id === r.place_id)!
+  const live = bookings.filter((b) => b.status !== 'cancelled' && roomOf(b).active)
 
-  const stats = [
-    { label: 'Khách đến', value: count('arriving', 'held') },
-    { label: 'Trả phòng', value: count('leaving') },
-    { label: 'Đang ở', value: count('occupied', 'leaving') },
-    { label: 'Cần dọn', value: rooms.filter((r) => r.active && r.housekeeping === 'dirty').length },
-  ]
+  const leaving = live.filter((b) => isStaying(b) && b.end_date <= today())
+  const dirty = rooms.filter((r) => r.active && r.housekeeping === 'dirty')
+  const arriving = live
+    .filter((b) => !b.checked_in_at && b.start_date <= today() && arrivalDate() < b.end_date)
+    .sort((a, b) => a.start_date.localeCompare(b.start_date))
+  const staying = live.filter((b) => isStaying(b) && b.end_date > today())
+  const undeclared = staying.filter((b) => !b.declared_at)
+  const holds = live.filter((b) => b.status === 'hold' && b.start_date > today() && b.start_date <= day(3))
+  const nothingToDo = !leaving.length && !dirty.length && !arriving.length && !undeclared.length && !holds.length
+
+  const where = (b: Booking) => `Phòng ${roomOf(b).name}${multi ? ` · ${placeOf(roomOf(b)).name}` : ''}`
 
   return (
     <>
       <Page restoreScroll>
-        <Header title={placeName} showBackIcon={false} />
+        <Header title="Hôm nay" showBackIcon={false} />
         <PageContainer withHeader withBottomNav>
-          <div className="p-4 space-y-4">
-            <div className="text-text-secondary text-sm">Hôm nay, {dayjs().format('dddd DD/MM/YYYY')}</div>
-            <div className="grid grid-cols-4 gap-2">
-              {stats.map((s) => (
-                <div key={s.label} className="bg-white rounded-xl p-3 text-center">
-                  <div className="text-2xl font-semibold">{s.value}</div>
-                  <div className="text-xs text-text-secondary mt-1">{s.label}</div>
-                </div>
+          <div className="p-4 space-y-6">
+            <div className="text-text-secondary text-base first-letter:uppercase">
+              {dayjs().format('dddd, DD/MM/YYYY')}
+            </div>
+
+            {/* Vacancy truth first: the answer hueni.me publishes. */}
+            <div className="space-y-3">
+              {places.map((p) => (
+                <VacancyCard key={p.id} place={p} multi={multi} />
               ))}
             </div>
-            <div className="font-semibold">Phòng</div>
-            {days.map((day) => (
-              <RoomCard key={day.room.id} day={day} />
-            ))}
+
+            <section className="space-y-5">
+              <h2 className="text-xl font-semibold m-0 px-1">Việc hôm nay</h2>
+              {nothingToDo && (
+                <Card>
+                  <Empty action={{ label: 'Xem lịch phòng', to: '/calendar' }}>
+                    Hôm nay không có việc nào cần làm.
+                  </Empty>
+                </Card>
+              )}
+
+              <Group title="Trả phòng" count={leaving.length}>
+                {leaving.map((b) => (
+                  <TaskRow key={b.id} booking={b} where={where(b)} late={overdueDays(b) > 0}>
+                    <CheckOutButton booking={b} room={roomOf(b)} fullWidth />
+                  </TaskRow>
+                ))}
+              </Group>
+
+              <Group title="Khách đến" count={arriving.length}>
+                {arriving.map((b) => (
+                  <TaskRow
+                    key={b.id}
+                    booking={b}
+                    where={where(b)}
+                    late={lateDays(b) > 0}
+                    phone
+                    tags={
+                      <>
+                        {b.status === 'hold' && <Tag tone="amber">Giữ chỗ</Tag>}
+                        {roomOf(b).housekeeping === 'dirty' && <Tag tone="stone">Phòng chưa dọn</Tag>}
+                      </>
+                    }
+                    secondary={lateDays(b) > 0 && <NoShowButton booking={b} />}
+                  >
+                    <CheckInButton booking={b} room={roomOf(b)} fullWidth />
+                  </TaskRow>
+                ))}
+              </Group>
+
+              <Group title="Cần dọn" count={dirty.length}>
+                {dirty.map((r) => (
+                  <Card key={r.id} className="p-4 flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-lg font-semibold">Phòng {r.name}</div>
+                      {multi && <div className="text-base text-text-secondary">{placeOf(r).name}</div>}
+                    </div>
+                    <CleanButton room={r} />
+                  </Card>
+                ))}
+              </Group>
+
+              <Group title="Chưa khai báo lưu trú" count={undeclared.length}>
+                {undeclared.map((b) => (
+                  <TaskRow key={b.id} booking={b} where={where(b)}>
+                    <DeclareButton booking={b} fullWidth />
+                  </TaskRow>
+                ))}
+              </Group>
+
+              <HoldGroup holds={holds} where={where} />
+
+              {staying.length > 0 && (
+                <p className="text-base text-text-secondary px-1 m-0">
+                  {staying.length} phòng có khách ở tiếp, không cần làm gì hôm nay.
+                </p>
+              )}
+            </section>
           </div>
         </PageContainer>
       </Page>
@@ -45,80 +141,116 @@ export default function TodayPage() {
   )
 }
 
-function RoomCard({ day }: { day: RoomDay }) {
+function VacancyCard({ place, multi }: { place: Place; multi: boolean }) {
   const navigate = useNavigate()
-  const { openSnackbar } = useSnackbar()
-  const actions = usePms((s) => s.actions)
-  const { room, state, booking, next } = day
-  const badge = STATE_LABEL[state]
-  const done = (text: string) => openSnackbar({ text, type: 'success', duration: 2000 })
+  const { rooms, bookings, feeds } = usePms()
+  const days = placeRooms(rooms, place.id).map((r) => roomDay(r, bookings))
+  const open = days.filter((d) => d.state !== 'off')
+  const free = open.filter((d) => d.state === 'free')
+  const failing = failingFeeds(feeds, rooms, place.id)
+
+  const headline = !open.length
+    ? 'Chưa có phòng nào nhận khách'
+    : free.length
+      ? `Còn ${free.length}/${open.length} phòng tối nay`
+      : 'Hết phòng tối nay'
 
   return (
-    <div className="bg-white rounded-xl p-4 space-y-3">
-      <div className="flex items-center justify-between gap-2">
-        <div className="font-semibold text-base">{room.name}</div>
-        <div className="flex gap-1">
-          {room.housekeeping === 'dirty' && (
-            <span className="px-2 py-1 rounded-full text-xs bg-red-100 text-red-700">Cần dọn</span>
-          )}
-          <span className={`px-2 py-1 rounded-full text-xs ${badge.className}`}>{badge.label}</span>
+    <Card className="p-2 space-y-2">
+      <button
+        className="w-full text-left bg-transparent border-0 p-3 rounded-xl text-text active:bg-ng-10"
+        onClick={() => navigate(`/places/${place.slug}`)}
+        aria-label={`${place.name}: ${headline}. Xem từng phòng`}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-base text-text-secondary font-medium truncate">{place.name}</span>
+          {multi && <RoleTag role={place.role} />}
         </div>
-      </div>
+        <div className={`text-2xl font-bold mt-1 ${free.length ? 'text-emerald-800' : 'text-stone-700'}`}>
+          {headline}
+        </div>
+        <div className="flex items-end justify-between gap-2 mt-1">
+          <span className="text-base text-text-secondary">
+            {free.length ? `Trống: ${free.map((d) => d.room.name).join(', ')}` : 'hueni.me đang hiện hết phòng'}
+          </span>
+          <span className="flex items-center gap-1 text-base font-semibold text-primary-pressed shrink-0">
+            Từng phòng <Icon icon="zi-chevron-right" size={20} />
+          </span>
+        </div>
+      </button>
+      {failing > 0 && (
+        <LinkRow tone="red" onClick={() => navigate('/feeds')}>
+          <Icon icon="zi-warning-solid" size={20} /> Lịch OTA lỗi ({failing}): phòng trống có thể sai
+        </LinkRow>
+      )}
+    </Card>
+  )
+}
 
-      {booking ? (
+function Group({ title, count, children }: { title: string; count: number; children: React.ReactNode }) {
+  if (!count) return null
+  return (
+    <section className="space-y-2">
+      <h3 className="text-lg font-semibold m-0 px-1">
+        {title} <span className="text-text-secondary font-normal">· {count}</span>
+      </h3>
+      {children}
+    </section>
+  )
+}
+
+function HoldGroup({ holds, where }: { holds: Booking[]; where: (b: Booking) => string }) {
+  const [open, setOpen] = useState(false)
+  if (!holds.length) return null
+  return (
+    <section className="space-y-2">
+      <button
+        className="w-full min-h-[48px] flex items-center justify-between px-1 bg-transparent border-0 text-left text-text"
+        onClick={() => setOpen(!open)}
+        aria-expanded={open}
+      >
+        <span className="text-lg font-semibold">
+          Giữ chỗ 3 ngày tới <span className="text-text-secondary font-normal">· {holds.length}</span>
+        </span>
+        <Icon icon={open ? 'zi-chevron-up' : 'zi-chevron-down'} size={24} />
+      </button>
+      {open && holds.map((b) => <TaskRow key={b.id} booking={b} where={where(b)} phone />)}
+    </section>
+  )
+}
+
+type TaskRowProps = {
+  booking: Booking
+  where: string
+  late?: boolean
+  phone?: boolean
+  tags?: React.ReactNode
+  secondary?: React.ReactNode
+  children?: React.ReactNode
+}
+
+// One row = one guest, one main action, full width. Rare actions sit apart, below a divider.
+function TaskRow({ booking, where, late, phone, tags, secondary, children }: TaskRowProps) {
+  const navigate = useNavigate()
+  return (
+    <Card className="p-4 space-y-3">
+      <div className="flex items-start gap-3">
         <button
-          className="w-full text-left bg-ng-10 rounded-lg p-3 border-0"
+          className="flex-1 min-w-0 text-left bg-transparent border-0 p-0 text-text"
           onClick={() => navigate(`/bookings/${booking.id}`)}
         >
-          <div className="font-medium">{booking.guest_name || 'Khách'}</div>
-          <div className="text-sm text-text-secondary">
-            {fmtDate(booking.start_date)} → {fmtDate(booking.end_date)}
-            {booking.guests ? ` · ${booking.guests} khách` : ''}
+          <div className="text-lg font-semibold truncate">
+            {guestLabel(booking)}
+            {booking.guests ? <span className="text-text-secondary font-normal"> · {booking.guests} khách</span> : null}
           </div>
-          {booking.checked_in_at && !booking.declared_at && (
-            <div className="text-xs text-amber-700 mt-1">Chưa khai báo lưu trú</div>
-          )}
+          <div className={late ? 'text-base font-semibold text-red-700' : 'text-base'}>{whenLabel(booking)}</div>
+          <div className="text-base text-text-secondary">{where}</div>
         </button>
-      ) : (
-        next && (
-          <div className="text-sm text-text-secondary">
-            Khách kế tiếp: {next.guest_name || 'Khách'} · {fmtDate(next.start_date)}
-          </div>
-        )
-      )}
-
-      <div className="flex gap-2">
-        {(state === 'arriving' || state === 'held') && booking && (
-          <Button size="small" fullWidth onClick={() => (actions.checkIn(booking.id), done('Đã nhận phòng'))}>
-            Nhận phòng
-          </Button>
-        )}
-        {(state === 'occupied' || state === 'leaving') && booking && (
-          <Button
-            size="small"
-            fullWidth
-            variant={state === 'leaving' ? 'primary' : 'secondary'}
-            onClick={() => (actions.checkOut(booking.id), done('Đã trả phòng'))}
-          >
-            Trả phòng
-          </Button>
-        )}
-        {room.housekeeping === 'dirty' && (
-          <Button
-            size="small"
-            fullWidth
-            variant="secondary"
-            onClick={() => (actions.clean(room.id), done('Đã dọn xong'))}
-          >
-            Dọn xong
-          </Button>
-        )}
-        {state === 'free' && (
-          <Button size="small" fullWidth variant="tertiary" onClick={() => navigate(`/bookings/new?room=${room.id}`)}>
-            Thêm đặt phòng
-          </Button>
-        )}
+        {phone && <CallButton phone={booking.guest_phone} />}
       </div>
-    </div>
+      {tags && <div className="flex flex-wrap gap-2 empty:hidden">{tags}</div>}
+      {children}
+      {secondary && <div className="pt-2 border-0 border-t border-solid border-border">{secondary}</div>}
+    </Card>
   )
 }

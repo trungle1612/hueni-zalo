@@ -8,16 +8,19 @@
 
   --color-ng-10: 247 247 248; // #F7F7F8
 
-  --color-primary-rgb: 242 87 48; // #F25730
-  --color-primary: #F25730;
-  --color-primary-pressed: #BF4526;
+  // Action orange: #F25730 (brand) failed white-text contrast (3.4:1); #C2410C is 5.2:1.
+  --color-primary-rgb: 194 65 12; // #C2410C
+  --color-primary: #C2410C;
+  --color-primary-pressed: #9A3412;
+  --color-primary-soft: #FDEDE7;
+  --color-primary-ink: #9A3412;
   --color-primary-foreground: #ffffff;
-  --color-inactive: #6F7071;
+  --color-inactive: #5F6368;
   --color-inactive-foreground: #ffffff;
   --color-border: #e5e5e5;
   --color-text: #0D0D0D;
-  --color-text-secondary: #767A7F;
-  --color-text-subtle: #6F7071;
+  --color-text-secondary: #5F6368; // 6:1 on white, 5.7:1 on the page grey
+  --color-text-subtle: #5F6368;
   --color-divider: rgba(0, 0, 0, 0.05);
   --color-background: #ffffff;
 }
@@ -27,7 +30,19 @@ html, body {
   user-select: none;
   --inset-top: var(--zaui-safe-area-inset-top, 0px);
   --inset-bottom: var(--zaui-safe-area-inset-bottom, 0px);
-  color: var(--color-text)
+  color: var(--color-text);
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+}
+
+::selection {
+  background-color: var(--color-primary-soft);
+  color: var(--color-primary-ink);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
 }
 
 .inset-top {
@@ -81,8 +96,9 @@ html, body {
 
 // ZAUI Overrides
 .zaui-header-back {
+  // Was white for the template's photo header: invisible on the PMS's white header.
   .zaui-btn-tertiary.zaui-btn-neutral {
-    color: #fff;
+    color: var(--color-text);
 
     &:active, &:focus-visible {
       background-color: transparent;
@@ -91,10 +107,17 @@ html, body {
 }
 
 .zaui-bottom-navigation-item {
-  color: #6F7071;
+  color: var(--color-inactive);
 }
 .zaui-bottom-navigation-item-active {
   color: var(--color-primary);
+}
+
+// Buttons inherit the page font (they defaulted to the browser's 13.33px).
+.zaui-btn {
+  font-family: inherit;
+  font-size: 16px;
+  font-weight: 600;
 }
 
 .zaui-btn-primary {
@@ -103,6 +126,20 @@ html, body {
   &:active, &:focus-visible {
     background-color: var(--color-primary-pressed);
   }
+}
+
+// One orange family instead of zmp's blue secondary (#006af5 on #d6e9ff was 3.9:1).
+.zaui-btn-secondary:not(.zaui-btn-danger) {
+  background-color: var(--color-primary-soft);
+  color: var(--color-primary-ink);
+
+  &:active, &:focus-visible {
+    background-color: #FAD9CC;
+  }
+}
+
+.zaui-btn-tertiary:not(.zaui-btn-danger) {
+  color: var(--color-primary-ink);
 }
 
 .zaui-snackbar-bottom {
@@ -152,7 +189,7 @@ html, body {
   padding: 7px 16px;
 }
 .zaui-btn-medium {
-  height: 42px;
+  height: 48px; // older users, one thumb: never below 44px
 }
 
 
@@ -214,3 +251,19 @@ html, body {
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+// Older users: zmp's 24px back chevron and small field labels are too small.
+// Its wrapper is a fixed 24px box, so grow the tap area invisibly to 44px instead of the button.
+.zaui-header-back-btn {
+  position: relative;
+
+  &::after {
+    content: '';
+    position: absolute;
+    inset: -10px;
+  }
+}
+
+.zaui-input-label {
+  font-size: 16px;
+}

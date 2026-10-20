@@ -13,6 +13,7 @@ module.exports = {
         primary: {
           DEFAULT: 'rgb(var(--color-primary-rgb) / <alpha-value>)',
           pressed: 'var(--color-primary-pressed)',
+          soft: 'var(--color-primary-soft)',
           foreground: 'var(--color-primary-foreground)',
         },
         inactive: {
