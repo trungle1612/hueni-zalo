@@ -1,102 +1,84 @@
 import dayjs from 'dayjs'
 import React from 'react'
-import { Button, Header, Icon, Page } from 'zmp-ui'
 
-import { PageContainer } from '@/components'
-import { useNotify } from '@/modules/pms/components/stay-buttons'
-import { Card, Empty, Tag, WarnIcon } from '@/modules/pms/components/ui'
-import { Feed, FEED_ERROR, placeRooms, PROVIDER_NAME, usePms } from '@/modules/pms/pms.store'
-import { PmsTabs } from '@/modules/pms/pms-tabs'
+import { AppBar, Badge, PlaceSub, Screen, Sec, toast, useCurrent } from '@/modules/pms/components/ui'
+import { Feed, FEED_ERROR, PROVIDER_NAME, usePms } from '@/modules/pms/pms.store'
 
 const ago = (iso: string) => dayjs(iso).fromNow()
 
-// Read-only sync status + Đồng bộ ngay (wiki §6d). Adding / removing feeds stays in the web admin.
+// Read-only sync status + Đồng bộ ngay. Adding / removing feeds stays in the web admin.
 export default function FeedsPage() {
-  const { places, rooms, feeds } = usePms()
+  const { feeds, actions } = usePms()
+  const { rooms } = useCurrent()
+  const list = rooms
+    .map((room) => ({ room, feeds: feeds.filter((f) => f.room_id === room.id) }))
+    .sort((a, b) => Number(b.feeds.some((f) => f.last_error)) - Number(a.feeds.some((f) => f.last_error)))
+
+  const status = (f: Feed) =>
+    !f.last_synced_at
+      ? 'Chưa đồng bộ lần nào'
+      : f.last_error
+        ? `Lỗi ${ago(f.last_synced_at)}${f.last_ok_at ? ` · đồng bộ được lần cuối ${ago(f.last_ok_at)}` : ''}`
+        : `Đã đồng bộ ${ago(f.last_synced_at)}`
 
   return (
-    <>
-      <Page restoreScroll>
-        <Header title="Kênh OTA" showBackIcon={false} />
-        <PageContainer withHeader withBottomNav>
-          <div className="p-4 space-y-6">
-            <p className="text-base text-text-secondary px-1 m-0">
-              hueni tự lấy lịch Airbnb / Booking.com mỗi giờ để phòng trống luôn đúng. Thêm hoặc xoá kênh trên trang
-              quản trị hueni.
-            </p>
-            {places.map((place) => {
-              const list = placeRooms(rooms, place.id)
-                .map((room) => ({ room, feeds: feeds.filter((f) => f.room_id === room.id) }))
-                .sort((a, b) => Number(b.feeds.some((f) => f.last_error)) - Number(a.feeds.some((f) => f.last_error)))
-              return (
-                <section key={place.id} className="space-y-3">
-                  <h2 className="text-xl font-semibold m-0 px-1">{place.name}</h2>
-                  {!list.length && (
-                    <Card>
-                      <Empty>Homestay chưa có phòng.</Empty>
-                    </Card>
-                  )}
-                  {list.map(({ room, feeds }) => {
-                    const errors = feeds.filter((f) => f.last_error).length
-                    return (
-                      <Card key={room.id} className="p-4 space-y-3">
-                        <div className="flex items-center justify-between gap-2">
-                          <h3 className="text-lg font-semibold m-0">Phòng {room.name}</h3>
-                          {!feeds.length ? (
-                            <Tag>Chưa nối OTA</Tag>
-                          ) : errors ? (
-                            <Tag tone="red">{errors} kênh lỗi</Tag>
-                          ) : (
-                            <Tag tone="green">Đang đồng bộ tốt</Tag>
-                          )}
-                        </div>
-                        {feeds.map((f) => (
-                          <FeedRow key={f.id} feed={f} />
-                        ))}
-                      </Card>
-                    )
-                  })}
-                </section>
-              )
-            })}
-          </div>
-        </PageContainer>
-      </Page>
-      <PmsTabs active="/feeds" />
-    </>
-  )
-}
-
-function FeedRow({ feed }: { feed: Feed }) {
-  const notify = useNotify()
-  const actions = usePms((s) => s.actions)
-  const status = !feed.last_synced_at
-    ? 'Chưa đồng bộ lần nào'
-    : feed.last_error
-      ? `Lỗi ${ago(feed.last_synced_at)}${feed.last_ok_at ? ` · lần được gần nhất ${ago(feed.last_ok_at)}` : ''}`
-      : `Đã đồng bộ ${ago(feed.last_synced_at)}`
-
-  return (
-    <div className="border-0 border-t border-solid border-border pt-3 space-y-3">
-      <div>
-        <div className="text-base font-semibold">{PROVIDER_NAME[feed.provider]}</div>
-        <div className={feed.last_error ? 'text-base text-red-800' : 'text-base text-text-secondary'}>{status}</div>
-      </div>
-      {feed.last_error && (
-        <div className="flex gap-2 items-start text-base bg-red-50 text-red-900 rounded-xl px-3 py-3">
-          <WarnIcon label="Lỗi" size={20} />
-          <span>{FEED_ERROR[feed.last_error]}</span>
+    <Screen>
+      <AppBar lead="back" title="Kênh OTA" sub={<PlaceSub />} />
+      <main className="scroll">
+        <div className="sec">
+          <p className="help">
+            hueni tự lấy lịch Airbnb / Booking.com mỗi giờ để phòng trống luôn đúng. Thêm hoặc xoá kênh trên trang quản
+            trị hueni.
+          </p>
         </div>
-      )}
-      <Button
-        fullWidth
-        size="medium"
-        variant="secondary"
-        prefixIcon={<Icon icon="zi-retry" />}
-        onClick={() => notify(actions.sync(feed.id), 'Đã đồng bộ. Phòng trống đã cập nhật')}
-      >
-        Đồng bộ ngay
-      </Button>
-    </div>
+        {list.map(({ room, feeds }) => (
+          <Sec
+            key={room.id}
+            title={`Phòng ${room.name}`}
+            aside={
+              !feeds.length ? (
+                <span className="aside">Chưa nối OTA</span>
+              ) : feeds.some((f) => f.last_error) ? (
+                <Badge tone="danger">{feeds.filter((f) => f.last_error).length} kênh lỗi</Badge>
+              ) : undefined
+            }
+          >
+            {feeds.length > 0 && (
+              <div className="panel">
+                {feeds.map((f) => (
+                  <div key={f.id} className="row" style={{ flexWrap: 'wrap' }}>
+                    <span className="grow">
+                      <span className="t1">{PROVIDER_NAME[f.provider]}</span>
+                      <span
+                        className="t2"
+                        style={{ whiteSpace: 'normal', ...(f.last_error ? { color: 'var(--danger)' } : {}) }}
+                      >
+                        {status(f)}
+                      </span>
+                    </span>
+                    {/* A dead link can't be retried from here: the fix is a new link in the web admin. */}
+                    {f.last_error !== 'gone' && (
+                      <button
+                        type="button"
+                        className="btn btn-sm"
+                        onClick={() => toast(actions.sync(f.id) || 'Đã đồng bộ. Phòng trống đã cập nhật')}
+                      >
+                        {f.last_error ? 'Thử lại' : 'Đồng bộ ngay'}
+                      </button>
+                    )}
+                    {f.last_error && (
+                      <div className="alert" style={{ flexBasis: '100%' }}>
+                        {FEED_ERROR[f.last_error]}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </Sec>
+        ))}
+        <div className="end" />
+      </main>
+    </Screen>
   )
 }

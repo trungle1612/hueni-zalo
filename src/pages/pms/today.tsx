@@ -1,256 +1,264 @@
 import dayjs from 'dayjs'
 import React, { useState } from 'react'
-import { Header, Icon, Page, useNavigate } from 'zmp-ui'
 
-import { PageContainer } from '@/components'
-import {
-  CheckInButton,
-  CheckOutButton,
-  CleanButton,
-  DeclareButton,
-  NoShowButton,
-} from '@/modules/pms/components/stay-buttons'
-import { CallButton, Card, Empty, LinkRow, RoleTag, Tag } from '@/modules/pms/components/ui'
+import { needsSheet, StayKind, StaySheet, useStay } from '@/modules/pms/components/stay-sheet'
+import { A, AppBar, Badge, Icon, PlaceSub, Screen, Sec, todayLine, useCurrent } from '@/modules/pms/components/ui'
 import {
   arrivalDate,
   Booking,
+  canCheckIn,
+  conflicts,
   day,
+  dueOf,
   failingFeeds,
+  fmtDay,
   guestLabel,
+  isOpen,
   isStaying,
   lateDays,
+  money,
+  needsCleaning,
+  nights,
+  occupies,
   overdueDays,
-  Place,
-  placeRooms,
-  Room,
-  roomDay,
+  paidOf,
+  sourceLabel,
   today,
   usePms,
   whenLabel,
 } from '@/modules/pms/pms.store'
-import { PmsTabs } from '@/modules/pms/pms-tabs'
+
+const sameDay = (iso?: string) => !!iso && dayjs(iso).isSame(dayjs(), 'day')
 
 export default function TodayPage() {
-  const { places, rooms, bookings } = usePms()
-  const multi = places.length > 1
-  const roomOf = (b: Booking) => rooms.find((r) => r.id === b.room_id)!
-  const placeOf = (r: Room) => places.find((p) => p.id === r.place_id)!
-  const live = bookings.filter((b) => b.status !== 'cancelled' && roomOf(b).active)
+  const { bookings, feeds, rooms: allRooms } = usePms()
+  const { place, rooms, roomOf } = useCurrent()
+  const stay = useStay()
+  const [tomorrow, setTomorrow] = useState(false)
+  const [sheet, setSheet] = useState<{ kind: StayKind; id: number }>()
 
-  const leaving = live.filter((b) => isStaying(b) && b.end_date <= today())
-  const dirty = rooms.filter((r) => r.active && r.housekeeping === 'dirty')
-  const arriving = live
-    .filter((b) => !b.checked_in_at && b.start_date <= today() && arrivalDate() < b.end_date)
-    .sort((a, b) => a.start_date.localeCompare(b.start_date))
-  const staying = live.filter((b) => isStaying(b) && b.end_date > today())
-  const undeclared = staying.filter((b) => !b.declared_at)
-  const holds = live.filter((b) => b.status === 'hold' && b.start_date > today() && b.start_date <= day(3))
-  const nothingToDo = !leaving.length && !dirty.length && !arriving.length && !undeclared.length && !holds.length
+  const ids = new Set(rooms.map((r) => r.id))
+  const mine = bookings.filter((b) => ids.has(b.room_id) && b.status !== 'cancelled')
+  const t = today()
+  const t1 = day(1)
+  const open = rooms.filter(isOpen)
+  const dirty = rooms.filter(needsCleaning)
 
-  const where = (b: Booking) => `Phòng ${roomOf(b).name}${multi ? ` · ${placeOf(roomOf(b)).name}` : ''}`
+  // Today keeps the guests already handled, marked Đã nhận / Đã trả, so the count reads "x chờ / n".
+  const arrivals = tomorrow
+    ? mine.filter((b) => !b.checked_in_at && b.start_date === t1)
+    : mine.filter(
+        (b) =>
+          (!b.checked_in_at && b.start_date <= t && arrivalDate() < b.end_date) ||
+          (sameDay(b.checked_in_at) && !b.checked_out_at),
+      )
+  const departures = tomorrow
+    ? mine.filter((b) => !b.checked_out_at && b.end_date === t1 && (isStaying(b) || b.start_date <= t1))
+    : mine.filter((b) => (isStaying(b) && b.end_date <= t) || sameDay(b.checked_out_at))
+  const byStart = (a: Booking, b: Booking) => a.start_date.localeCompare(b.start_date) || a.id - b.id
+  arrivals.sort(byStart)
+  departures.sort(byStart)
 
-  return (
-    <>
-      <Page restoreScroll>
-        <Header title="Hôm nay" showBackIcon={false} />
-        <PageContainer withHeader withBottomNav>
-          <div className="p-4 space-y-6">
-            <div className="text-text-secondary text-base first-letter:uppercase">
-              {dayjs().format('dddd, DD/MM/YYYY')}
-            </div>
+  const waitingIn = arrivals.filter((b) => !b.checked_in_at).length
+  const waitingOut = departures.filter((b) => !b.checked_out_at).length
+  const inHouse = mine.filter((b) => (tomorrow ? occupies(b, t1, day(2)) : isStaying(b))).length
 
-            {/* Vacancy truth first: the answer hueni.me publishes. */}
-            <div className="space-y-3">
-              {places.map((p) => (
-                <VacancyCard key={p.id} place={p} multi={multi} />
-              ))}
-            </div>
+  // Every open problem, not just the first: the OTA feed is pinned above, the rest listed here.
+  const failing = failingFeeds(feeds, allRooms, place.id)
+  const undeclared = mine.filter((b) => isStaying(b) && !b.declared_at)
+  const tasks: { key: string; text: string; to: string }[] = tomorrow
+    ? []
+    : [
+        ...conflicts(mine).map((c) => ({
+          key: `c${c.ota.id}-${c.manual.id}`,
+          text: `Đặt phòng ${sourceLabel(c.ota)} trùng lịch phòng ${roomOf(c.ota.room_id)?.name} với ${guestLabel(c.manual)}.`,
+          to: `/bookings/${c.manual.id}`,
+        })),
+        ...arrivals
+          .filter((b) => !b.checked_in_at && roomOf(b.room_id)?.housekeeping === 'dirty')
+          .map((b) => ({
+            key: `d${b.id}`,
+            text: `Phòng ${roomOf(b.room_id)?.name} chưa dọn, ${guestLabel(b)} đến hôm nay.`,
+            to: '/rooms?f=clean',
+          })),
+        ...(undeclared.length
+          ? [
+              {
+                key: 'decl',
+                text: `${undeclared.length} khách đang ở chưa khai báo lưu trú.`,
+                to: `/bookings/${undeclared[0].id}`,
+              },
+            ]
+          : []),
+      ]
+  const [allTasks, setAllTasks] = useState(false)
+  const shownTasks = allTasks ? tasks : tasks.slice(0, 3)
 
-            <section className="space-y-5">
-              <h2 className="text-xl font-semibold m-0 px-1">Việc hôm nay</h2>
-              {nothingToDo && (
-                <Card>
-                  <Empty action={{ label: 'Xem lịch phòng', to: '/calendar' }}>
-                    Hôm nay không có việc nào cần làm.
-                  </Empty>
-                </Card>
-              )}
+  function act(kind: StayKind, b: Booking) {
+    const room = roomOf(b.room_id)!
+    if (needsSheet(kind, b, room, bookings)) return setSheet({ kind, id: b.id })
+    // A refused tap (e.g. the room still has a guest) opens the sheet, which says why.
+    if (stay(kind, b, room)) setSheet({ kind, id: b.id })
+  }
 
-              <Group title="Trả phòng" count={leaving.length}>
-                {leaving.map((b) => (
-                  <TaskRow key={b.id} booking={b} where={where(b)} late={overdueDays(b) > 0}>
-                    <CheckOutButton booking={b} room={roomOf(b)} fullWidth />
-                  </TaskRow>
-                ))}
-              </Group>
-
-              <Group title="Khách đến" count={arriving.length}>
-                {arriving.map((b) => (
-                  <TaskRow
-                    key={b.id}
-                    booking={b}
-                    where={where(b)}
-                    late={lateDays(b) > 0}
-                    phone
-                    tags={
-                      <>
-                        {b.status === 'hold' && <Tag tone="amber">Giữ chỗ</Tag>}
-                        {roomOf(b).housekeeping === 'dirty' && <Tag tone="stone">Phòng chưa dọn</Tag>}
-                      </>
-                    }
-                    secondary={lateDays(b) > 0 && <NoShowButton booking={b} />}
-                  >
-                    <CheckInButton booking={b} room={roomOf(b)} fullWidth />
-                  </TaskRow>
-                ))}
-              </Group>
-
-              <Group title="Cần dọn" count={dirty.length}>
-                {dirty.map((r) => (
-                  <Card key={r.id} className="p-4 flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="text-lg font-semibold">Phòng {r.name}</div>
-                      {multi && <div className="text-base text-text-secondary">{placeOf(r).name}</div>}
-                    </div>
-                    <CleanButton room={r} />
-                  </Card>
-                ))}
-              </Group>
-
-              <Group title="Chưa khai báo lưu trú" count={undeclared.length}>
-                {undeclared.map((b) => (
-                  <TaskRow key={b.id} booking={b} where={where(b)}>
-                    <DeclareButton booking={b} fullWidth />
-                  </TaskRow>
-                ))}
-              </Group>
-
-              <HoldGroup holds={holds} where={where} />
-
-              {staying.length > 0 && (
-                <p className="text-base text-text-secondary px-1 m-0">
-                  {staying.length} phòng có khách ở tiếp, không cần làm gì hôm nay.
-                </p>
-              )}
-            </section>
-          </div>
-        </PageContainer>
-      </Page>
-      <PmsTabs active="/" />
-    </>
-  )
-}
-
-function VacancyCard({ place, multi }: { place: Place; multi: boolean }) {
-  const navigate = useNavigate()
-  const { rooms, bookings, feeds } = usePms()
-  const days = placeRooms(rooms, place.id).map((r) => roomDay(r, bookings))
-  const open = days.filter((d) => d.state !== 'off')
-  const free = open.filter((d) => d.state === 'free')
-  const failing = failingFeeds(feeds, rooms, place.id)
-
-  const headline = !open.length
-    ? 'Chưa có phòng nào nhận khách'
-    : free.length
-      ? `Còn ${free.length}/${open.length} phòng tối nay`
-      : 'Hết phòng tối nay'
-
-  return (
-    <Card className="p-2 space-y-2">
-      <button
-        className="w-full text-left bg-transparent border-0 p-3 rounded-xl text-text active:bg-ng-10"
-        onClick={() => navigate(`/places/${place.slug}`)}
-        aria-label={`${place.name}: ${headline}. Xem từng phòng`}
-      >
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-base text-text-secondary font-medium truncate">{place.name}</span>
-          {multi && <RoleTag role={place.role} />}
-        </div>
-        <div className={`text-2xl font-bold mt-1 ${free.length ? 'text-emerald-800' : 'text-stone-700'}`}>
-          {headline}
-        </div>
-        <div className="flex items-end justify-between gap-2 mt-1">
-          <span className="text-base text-text-secondary">
-            {free.length ? `Trống: ${free.map((d) => d.room.name).join(', ')}` : 'hueni.me đang hiện hết phòng'}
+  function row(b: Booking, kind: 'in' | 'out') {
+    const room = roomOf(b.room_id)!
+    const done = kind === 'in' ? !!b.checked_in_at : !!b.checked_out_at
+    const due = dueOf(b, room)
+    const meta =
+      kind === 'in'
+        ? [
+            `${nights(b)} đêm`,
+            b.guests && `${b.guests} khách`,
+            b.source === 'ical' ? b.guest_name && sourceLabel(b) : b.origin,
+            lateDays(b) > 0 && `trễ ${lateDays(b)} ngày`,
+            b.status === 'hold' ? 'giữ chỗ' : b.source === 'manual' && due > 0 && !paidOf(b, room) && 'chưa cọc',
+          ]
+        : [overdueDays(b) > 0 ? whenLabel(b) : `Ở từ ${fmtDay(b.start_date)}`, b.guests && `${b.guests} khách`]
+    const canAct = !tomorrow && !done && (kind === 'in' ? canCheckIn(b) : isStaying(b))
+    const verb = kind === 'in' ? 'Nhận' : 'Trả'
+    return (
+      <div className="row" key={b.id}>
+        <A className="row-main" to={`/bookings/${b.id}`}>
+          <span className="rn">{room.name}</span>
+          <span className="grow">
+            <span className="t1">{guestLabel(b)}</span>
+            <span className="t2">{meta.filter(Boolean).join(' · ')}</span>
+            {!done && due > 0 && <span className="due">Còn thu {money(due)}</span>}
           </span>
-          <span className="flex items-center gap-1 text-base font-semibold text-primary-pressed shrink-0">
-            Từng phòng <Icon icon="zi-chevron-right" size={20} />
-          </span>
-        </div>
-      </button>
-      {failing > 0 && (
-        <LinkRow tone="red" onClick={() => navigate('/feeds')}>
-          <Icon icon="zi-warning-solid" size={20} /> Lịch OTA lỗi ({failing}): phòng trống có thể sai
-        </LinkRow>
-      )}
-    </Card>
-  )
-}
-
-function Group({ title, count, children }: { title: string; count: number; children: React.ReactNode }) {
-  if (!count) return null
-  return (
-    <section className="space-y-2">
-      <h3 className="text-lg font-semibold m-0 px-1">
-        {title} <span className="text-text-secondary font-normal">· {count}</span>
-      </h3>
-      {children}
-    </section>
-  )
-}
-
-function HoldGroup({ holds, where }: { holds: Booking[]; where: (b: Booking) => string }) {
-  const [open, setOpen] = useState(false)
-  if (!holds.length) return null
-  return (
-    <section className="space-y-2">
-      <button
-        className="w-full min-h-[48px] flex items-center justify-between px-1 bg-transparent border-0 text-left text-text"
-        onClick={() => setOpen(!open)}
-        aria-expanded={open}
-      >
-        <span className="text-lg font-semibold">
-          Giữ chỗ 3 ngày tới <span className="text-text-secondary font-normal">· {holds.length}</span>
-        </span>
-        <Icon icon={open ? 'zi-chevron-up' : 'zi-chevron-down'} size={24} />
-      </button>
-      {open && holds.map((b) => <TaskRow key={b.id} booking={b} where={where(b)} phone />)}
-    </section>
-  )
-}
-
-type TaskRowProps = {
-  booking: Booking
-  where: string
-  late?: boolean
-  phone?: boolean
-  tags?: React.ReactNode
-  secondary?: React.ReactNode
-  children?: React.ReactNode
-}
-
-// One row = one guest, one main action, full width. Rare actions sit apart, below a divider.
-function TaskRow({ booking, where, late, phone, tags, secondary, children }: TaskRowProps) {
-  const navigate = useNavigate()
-  return (
-    <Card className="p-4 space-y-3">
-      <div className="flex items-start gap-3">
-        <button
-          className="flex-1 min-w-0 text-left bg-transparent border-0 p-0 text-text"
-          onClick={() => navigate(`/bookings/${booking.id}`)}
-        >
-          <div className="text-lg font-semibold truncate">
-            {guestLabel(booking)}
-            {booking.guests ? <span className="text-text-secondary font-normal"> · {booking.guests} khách</span> : null}
-          </div>
-          <div className={late ? 'text-base font-semibold text-red-700' : 'text-base'}>{whenLabel(booking)}</div>
-          <div className="text-base text-text-secondary">{where}</div>
-        </button>
-        {phone && <CallButton phone={booking.guest_phone} />}
+        </A>
+        {canAct ? (
+          <button
+            type="button"
+            className="btn btn-sm"
+            aria-label={`${kind === 'in' ? 'Nhận phòng' : 'Trả phòng'} ${room.name}, ${guestLabel(b)}`}
+            onClick={() => act(kind, b)}
+          >
+            {verb}
+          </button>
+        ) : done ? (
+          <Badge tone="positive">{kind === 'in' ? 'Đã nhận' : 'Đã trả'}</Badge>
+        ) : (
+          tomorrow && <Badge tone="neutral">Ngày mai</Badge>
+        )}
       </div>
-      {tags && <div className="flex flex-wrap gap-2 empty:hidden">{tags}</div>}
-      {children}
-      {secondary && <div className="pt-2 border-0 border-t border-solid border-border">{secondary}</div>}
-    </Card>
+    )
+  }
+
+  const open_ = sheet && bookings.find((b) => b.id === sheet.id)
+
+  return (
+    <Screen tab="/">
+      <AppBar
+        title="Hôm nay"
+        sub={<PlaceSub prefix={tomorrow ? `Xem trước ${fmtDay(t1)}/${t1.slice(0, 4)}` : todayLine()} />}
+      >
+        <A className="icon-btn" to="/search" aria-label="Tìm đặt phòng">
+          <Icon name="search" />
+        </A>
+        <A className="btn btn-sm" to="/bookings/new">
+          + Đặt phòng
+        </A>
+      </AppBar>
+      <div className="seg" role="group" aria-label="Chọn ngày">
+        <button type="button" aria-pressed={!tomorrow} onClick={() => setTomorrow(false)}>
+          Hôm nay
+        </button>
+        <button type="button" aria-pressed={tomorrow} onClick={() => setTomorrow(true)}>
+          Ngày mai
+        </button>
+      </div>
+      {failing > 0 && !tomorrow && (
+        <A className="band" to="/feeds" role="alert">
+          <span>Lịch OTA lỗi ở {failing} kênh: phòng trống trên hueni.me có thể sai.</span>
+          <b>Sửa</b>
+        </A>
+      )}
+
+      <main className="scroll">
+        <div className="sec">
+          <div className="panel stats">
+            <div className="stat">
+              <b>{waitingIn}</b>
+              <span>{tomorrow ? 'Sẽ đến' : 'Chờ đến'}</span>
+            </div>
+            <div className="stat">
+              <b>{waitingOut}</b>
+              <span>{tomorrow ? 'Sẽ đi' : 'Chờ đi'}</span>
+            </div>
+            <div className="stat">
+              <b>
+                {inHouse}
+                <small>/{open.length}</small>
+              </b>
+              <span>{tomorrow ? 'Dự kiến ở' : 'Đang ở'}</span>
+            </div>
+            <A className="stat" to="/rooms?f=clean">
+              <b>{tomorrow ? departures.length : dirty.length}</b>
+              <span>{tomorrow ? 'Sẽ cần dọn' : 'Cần dọn'}</span>
+            </A>
+          </div>
+        </div>
+
+        {shownTasks.length > 0 && (
+          <Sec title={`Cần xử lý · ${tasks.length}`}>
+            <div className="tasks" role="list">
+              {shownTasks.map((t) => (
+                <A key={t.key} role="listitem" className="task" to={t.to}>
+                  <span>{t.text}</span>
+                  <b>Xem</b>
+                </A>
+              ))}
+              {tasks.length > 3 && !allTasks && (
+                <button type="button" className="task more-tasks" onClick={() => setAllTasks(true)}>
+                  <span>Xem thêm {tasks.length - 3} việc khác</span>
+                </button>
+              )}
+            </div>
+          </Sec>
+        )}
+
+        <Sec
+          title={tomorrow ? `Nhận phòng · ${arrivals.length}` : `Nhận phòng · ${waitingIn} chờ / ${arrivals.length}`}
+          aside={
+            <A className="link" to="/calendar">
+              Lịch
+            </A>
+          }
+        >
+          <div className="panel">
+            {arrivals.map((b) => row(b, 'in'))}
+            {!arrivals.length && (
+              <div className="empty-row">
+                {tomorrow ? 'Ngày mai không có khách đến.' : 'Hôm nay không có khách đến. Khách đặt mới sẽ hiện ở đây.'}
+              </div>
+            )}
+          </div>
+        </Sec>
+
+        <Sec
+          title={tomorrow ? `Trả phòng · ${departures.length}` : `Trả phòng · ${waitingOut} chờ / ${departures.length}`}
+        >
+          <div className="panel">
+            {departures.map((b) => row(b, 'out'))}
+            {!departures.length && (
+              <div className="empty-row">
+                {tomorrow ? 'Ngày mai không có khách trả phòng.' : 'Hôm nay không có khách trả phòng.'}
+              </div>
+            )}
+          </div>
+        </Sec>
+        <div className="end" />
+      </main>
+
+      {open_ && sheet && (
+        <StaySheet
+          kind={sheet.kind}
+          booking={open_}
+          room={roomOf(open_.room_id)!}
+          onClose={() => setSheet(undefined)}
+        />
+      )}
+    </Screen>
   )
 }
