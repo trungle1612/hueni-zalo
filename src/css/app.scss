@@ -8,12 +8,12 @@
 
   --color-ng-10: 247 247 248; // #F7F7F8
 
-  // Action orange: #F25730 (brand) failed white-text contrast (3.4:1); #C2410C is 5.2:1.
-  --color-primary-rgb: 194 65 12; // #C2410C
-  --color-primary: #C2410C;
-  --color-primary-pressed: #9A3412;
-  --color-primary-soft: #FDEDE7;
-  --color-primary-ink: #9A3412;
+  // Ruby Bloom, same as the PMS tokens (src/modules/pms/pms.scss); white on it 6.5:1.
+  --color-primary-rgb: 168 50 77; // #A8324D
+  --color-primary: #A8324D;
+  --color-primary-pressed: #8A2840;
+  --color-primary-soft: #F2E6EE;
+  --color-primary-ink: #8A2840;
   --color-primary-foreground: #ffffff;
   --color-inactive: #5F6368;
   --color-inactive-foreground: #ffffff;
@@ -134,7 +134,7 @@ html, body {
   color: var(--color-primary-ink);
 
   &:active, &:focus-visible {
-    background-color: #FAD9CC;
+    background-color: #E8D3E0;
   }
 }
 

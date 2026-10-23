@@ -1,252 +1,542 @@
 import React, { useState } from 'react'
-import { useParams, useSearchParams } from 'react-router-dom'
-import { Button, Icon, Input, Page, Select, useNavigate, useSnackbar } from 'zmp-ui'
+import { useLocation, useParams, useSearchParams } from 'react-router-dom'
+import { useNavigate } from 'zmp-ui'
 
-import { PageContainer } from '@/components'
-import { BackHeader, Empty, WarnIcon } from '@/modules/pms/components/ui'
+import {
+  A,
+  AppBar,
+  Field,
+  KV,
+  MoneyInput,
+  PHONE_ERROR,
+  phoneDigits,
+  Screen,
+  Sec,
+  Segmented,
+  Sheet,
+  toast,
+} from '@/modules/pms/components/ui'
 import {
   addDays,
   Booking,
-  dateProblem,
-  fmtRange,
+  bookingCode,
+  can,
+  daysBetween,
+  fmtDate,
+  inMaintenance,
   isEditable,
   isRoomFree,
-  nights,
+  isStaying,
+  money,
+  paidOf,
   placeRooms,
   today,
   usePlace,
   usePms,
 } from '@/modules/pms/pms.store'
-import { clsx } from '@/utils/clsx'
 
-// Phone must be callable: digits, spaces and + - . ( ), 8–15 digits (foreign numbers allowed).
-const phoneError = (phone: string) => {
-  if (!phone.trim()) return undefined
-  const digits = phone.replace(/\D/g, '').length
-  return /^[\d\s+\-.()]+$/.test(phone) && digits >= 8 && digits <= 15
-    ? undefined
-    : 'Số điện thoại không hợp lệ: cần 8–15 chữ số'
+const ORIGINS = ['Trực tiếp', 'Điện thoại / Zalo', 'Facebook', 'Khác']
+const LABELS = {
+  guest_phone: 'Số điện thoại',
+  guest_name: 'Tên khách',
+  guests: 'Số khách',
+  origin: 'Nguồn',
+  start_date: 'Nhận phòng',
+  end_date: 'Trả phòng',
+  room_id: 'Phòng',
+  status: 'Trạng thái',
+  price: 'Giá mỗi đêm',
+  note: 'Ghi chú',
 }
+type Key = keyof typeof LABELS
 
-const STATUS_CHOICES = [
-  { value: 'confirmed', title: 'Đã xác nhận', hint: 'Khách chắc chắn đến.' },
-  { value: 'hold', title: 'Giữ chỗ', hint: 'Khách chưa chắc. Phòng vẫn được giữ cho tới khi xác nhận hoặc huỷ.' },
-] as const
-
-// Create (/bookings/new?room=&start=&place=) and edit (/bookings/:id/edit) share this form (wiki §6c).
+// Create (/bookings/new?room=&start=) and edit (/bookings/:id/edit) share this form.
 export default function BookingFormPage() {
   const { id } = useParams()
   const [params] = useSearchParams()
-  const navigate = useNavigate()
-  const { openSnackbar } = useSnackbar()
-  const { rooms, bookings, actions } = usePms()
-
+  const { rooms, bookings } = usePms()
   const editing = id ? bookings.find((b) => b.id === Number(id)) : undefined
-  const paramRoom = rooms.find((r) => r.id === Number(params.get('room') || editing?.room_id))
-  const fallbackPlace = usePlace(params.get('place') || undefined)
-  const placeId = paramRoom?.place_id ?? fallbackPlace.id
-  const roomList = placeRooms(rooms, placeId).filter((r) => r.active)
-
-  const start0 = editing?.start_date || params.get('start') || today()
-  const firstFree = roomList.find((r) => isRoomFree(bookings, r.id, start0, addDays(start0, 1)))
-  const [form, setForm] = useState({
-    room_id: paramRoom?.id ?? firstFree?.id ?? roomList[0]?.id,
-    start_date: start0,
-    end_date: editing?.end_date || addDays(start0, 1),
-    guest_name: editing?.guest_name || '',
-    guest_phone: editing?.guest_phone || '',
-    guests: editing?.guests ? String(editing.guests) : '',
-    status: (editing?.status === 'hold' ? 'hold' : 'confirmed') as 'hold' | 'confirmed',
-    note: editing?.note || '',
-  })
-  const [submitted, setSubmitted] = useState(false)
+  const fallback = usePlace()
 
   if (id && (!editing || !isEditable(editing))) {
     return (
-      <Page>
-        <BackHeader title="Sửa đặt phòng" />
-        <PageContainer withHeader>
-          <Empty action={{ label: 'Về Hôm nay', to: '/' }}>
+      <Screen>
+        <AppBar lead="back" title="Sửa đặt phòng" />
+        <main className="scroll">
+          <div className="empty">
             {editing ? 'Đặt phòng này không sửa được nữa.' : 'Không tìm thấy đặt phòng này.'}
-          </Empty>
-        </PageContainer>
-      </Page>
+            <A className="btn" to="/" replace>
+              Về Hôm nay
+            </A>
+          </div>
+        </main>
+      </Screen>
     )
   }
-
-  const room = rooms.find((r) => r.id === form.room_id)
-  const update = (patch: Partial<typeof form>) => setForm({ ...form, ...patch })
-  const setStart = (start: string) =>
-    update({ start_date: start, end_date: form.end_date <= start ? addDays(start, 1) : form.end_date })
-
-  const problem = room ? dateProblem(bookings, form, editing?.id) : 'Chọn phòng'
-  const otherFree = problem
-    ? roomList.filter(
-        (r) => r.id !== form.room_id && isRoomFree(bookings, r.id, form.start_date, form.end_date, editing?.id),
-      )
-    : []
-  const guests = Number(form.guests) || undefined
-  const errors = {
-    guest_phone: phoneError(form.guest_phone),
-    guests:
-      room && guests && guests > room.max_guests ? `Phòng ${room.name} tối đa ${room.max_guests} khách` : undefined,
-  }
-  const invalid = !!problem || Object.values(errors).some(Boolean)
-
-  function submit() {
-    setSubmitted(true)
-    if (invalid) return
-    const draft: Omit<Booking, 'id' | 'source' | 'status'> & { status: 'hold' | 'confirmed' } = {
-      ...form,
-      guests,
-      guest_name: form.guest_name.trim() || undefined,
-      guest_phone: form.guest_phone.trim() || undefined,
-      note: form.note.trim() || undefined,
-    }
-    const result = editing ? (actions.update(editing.id, draft) ?? editing.id) : actions.create(draft)
-    if (typeof result === 'string') return openSnackbar({ text: result, type: 'error', duration: 6000 })
-    openSnackbar({ text: editing ? 'Đã lưu đặt phòng' : 'Đã đặt phòng', type: 'success', duration: 2000 })
-    navigate(`/bookings/${result}`, { replace: true })
-  }
-
-  const status = (key: keyof typeof errors) => (errors[key] && (submitted || key === 'guests') ? 'error' : undefined)
-
+  const paramRoom = rooms.find((r) => r.id === Number(params.get('room') || editing?.room_id))
+  const placeId = paramRoom?.place_id ?? fallback.id
   return (
-    <Page restoreScroll className="bg-white">
-      <BackHeader title={editing ? 'Sửa đặt phòng' : 'Đặt phòng mới'} />
-      <PageContainer withHeader>
-        <div className="p-4 space-y-5 pb-10">
-          {roomList.length === 1 ? (
-            <div>
-              <div className="text-base text-text-secondary">Phòng</div>
-              <div className="font-semibold text-lg">
-                {roomList[0].name} · tối đa {roomList[0].max_guests} khách
-              </div>
-            </div>
-          ) : (
-            <Select label="Phòng" value={form.room_id} onChange={(v) => update({ room_id: Number(v) })} closeOnSelect>
-              {roomList.map((r) => (
-                <Select.Option key={r.id} value={r.id} title={`${r.name} · tối đa ${r.max_guests} khách`} />
-              ))}
-            </Select>
-          )}
-
-          <div className="grid grid-cols-2 gap-3">
-            <DateField label="Nhận phòng" value={form.start_date} onChange={setStart} />
-            <DateField label="Trả phòng" value={form.end_date} onChange={(end_date) => update({ end_date })} />
-          </div>
-
-          <div
-            aria-live="polite"
-            className={clsx(
-              'rounded-xl px-3 py-3 text-base font-medium',
-              problem ? 'bg-red-50 text-red-900' : 'bg-emerald-50 text-emerald-900',
-            )}
-          >
-            <div className="flex gap-2 items-start">
-              {problem ? (
-                <WarnIcon label="Không đặt được" size={20} />
-              ) : (
-                <Icon icon="zi-check-circle-solid" size={20} className="shrink-0" />
-              )}
-              <span>
-                {problem ||
-                  (editing
-                    ? `Không trùng lịch · ${nights(form)} đêm`
-                    : `${room?.name} còn trống · ${nights(form)} đêm (${fmtRange(form)})`)}
-              </span>
-            </div>
-            {otherFree.length > 0 && (
-              <div className="mt-3 space-y-2 font-normal text-text">
-                <div>Phòng khác còn trống, chạm để chọn:</div>
-                <div className="flex flex-wrap gap-2">
-                  {otherFree.map((r) => (
-                    <Button key={r.id} size="medium" variant="secondary" onClick={() => update({ room_id: r.id })}>
-                      Phòng {r.name}
-                    </Button>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-
-          <Input
-            label="Tên khách"
-            maxLength={100}
-            value={form.guest_name}
-            onChange={(e) => update({ guest_name: e.target.value })}
-          />
-          <Input
-            type="text"
-            inputMode="tel"
-            label="Số điện thoại"
-            value={form.guest_phone}
-            status={status('guest_phone')}
-            errorText={errors.guest_phone}
-            onChange={(e) => update({ guest_phone: e.target.value })}
-          />
-          <Input
-            type="number"
-            inputMode="numeric"
-            label={room ? `Số khách (tối đa ${room.max_guests})` : 'Số khách'}
-            value={form.guests}
-            status={status('guests')}
-            errorText={errors.guests}
-            onChange={(e) => update({ guests: e.target.value })}
-          />
-          <fieldset className="border-0 p-0 m-0 space-y-2">
-            <legend className="text-base mb-2 p-0">Khách đã chắc chắn chưa?</legend>
-            {STATUS_CHOICES.map((c) => (
-              <label
-                key={c.value}
-                className={clsx(
-                  'flex gap-3 items-start rounded-xl border-2 border-solid p-3 min-h-[48px]',
-                  form.status === c.value ? 'border-primary bg-primary-soft' : 'border-border bg-white',
-                )}
-              >
-                <input
-                  type="radio"
-                  name="status"
-                  value={c.value}
-                  checked={form.status === c.value}
-                  onChange={() => update({ status: c.value })}
-                  className="mt-1 w-5 h-5 accent-[#C2410C] shrink-0"
-                />
-                <span>
-                  <span className="block text-base font-semibold">{c.title}</span>
-                  <span className="block text-base text-text-secondary">{c.hint}</span>
-                </span>
-              </label>
-            ))}
-          </fieldset>
-          <Input.TextArea label="Ghi chú" value={form.note} onChange={(e) => update({ note: e.target.value })} />
-
-          <div className="space-y-2 pt-2">
-            <Button fullWidth size="medium" disabled={!!problem} onClick={submit}>
-              {editing ? 'Lưu thay đổi' : 'Đặt phòng'}
-            </Button>
-            <Button fullWidth size="medium" variant="tertiary" onClick={() => navigate(-1)}>
-              Thôi, không {editing ? 'sửa' : 'đặt'}
-            </Button>
-          </div>
-        </div>
-      </PageContainer>
-    </Page>
+    <Form
+      key={id || 'new'}
+      editing={editing}
+      placeId={placeId}
+      roomId={paramRoom?.id}
+      start={params.get('start') || undefined}
+    />
   )
 }
 
-// zmp-ui Input has no date type; the native picker is the best one on phones anyway.
-function DateField({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+function Form({
+  editing,
+  placeId,
+  roomId,
+  start,
+}: {
+  editing?: Booking
+  placeId: number
+  roomId?: number
+  start?: string
+}) {
+  const navigate = useNavigate()
+  // From Hồ sơ khách: name and phone come as router state, never in the URL.
+  const from = (useLocation().state || {}) as { guest_name?: string; guest_phone?: string }
+  const { places, rooms, bookings, actions } = usePms()
+  const owner = can(
+    places.find((p) => p.id === placeId),
+    'manage',
+  )
+  const roomList = placeRooms(rooms, placeId)
+    .filter((r) => r.active)
+    .sort((a, b) => a.name.localeCompare(b.name, 'vi', { numeric: true }))
+
+  const start0 = editing?.start_date || start || today()
+  const orig = {
+    guest_phone: editing?.guest_phone || from.guest_phone || '',
+    guest_name: editing?.guest_name || from.guest_name || '',
+    guests: editing?.guests,
+    origin: editing?.origin || 'Trực tiếp',
+    start_date: start0,
+    end_date: editing?.end_date || addDays(start0, 1),
+    room_id:
+      editing?.room_id ??
+      roomId ??
+      roomList.find((r) => !inMaintenance(r, start0) && isRoomFree(bookings, r.id, start0, addDays(start0, 1)))?.id,
+    status: (editing?.status === 'hold' ? 'hold' : 'confirmed') as 'hold' | 'confirmed',
+    price: editing?.price,
+    note: editing?.note || '',
+  }
+  const [f, setF] = useState(orig)
+  const [deposit, setDeposit] = useState<number>()
+  const [tried, setTried] = useState(false)
+  const [discard, setDiscard] = useState(false)
+  const [saved, setSaved] = useState<{ id: number; changes: [Key, string, string][] }>()
+  const set = (patch: Partial<typeof f>) => setF({ ...f, ...patch })
+
+  const staying = !!editing && isStaying(editing)
+  const n = daysBetween(f.start_date, f.end_date)
+  const past = !editing && f.start_date < today()
+  const datesOk = n > 0 && !past
+  const busy = (roomId: number) => {
+    const r = roomList.find((x) => x.id === roomId)!
+    return (
+      !datesOk || inMaintenance(r, f.start_date) || !isRoomFree(bookings, roomId, f.start_date, f.end_date, editing?.id)
+    )
+  }
+  const free = roomList.filter((r) => !busy(r.id))
+  const room = rooms.find((r) => r.id === f.room_id)
+  const roomOk = !!room && !busy(room.id)
+  const price = f.price ?? room?.price ?? 0
+  const total = datesOk ? n * price : 0
+  const paid = editing ? paidOf(editing, room) : deposit || 0
+  const due = Math.max(0, total - paid)
+
+  const err = {
+    phone: tried && phoneDigits(f.guest_phone).length < 9 && PHONE_ERROR,
+    name: tried && !f.guest_name.trim() && 'Nhập tên khách.',
+    dates: (n <= 0 && 'Ngày trả phòng phải sau ngày nhận phòng.') || (past && 'Ngày nhận phòng đã qua.') || undefined,
+    room:
+      datesOk &&
+      ((f.room_id !== undefined && !roomOk && `Phòng ${room?.name} đã kín trong các ngày này. Chọn phòng khác.`) ||
+        (tried && f.room_id === undefined && free.length > 0 && 'Chọn một phòng.')),
+    deposit: !!deposit && deposit > total && `Tiền cọc không được lớn hơn tổng ${money(total)}.`,
+  }
+  const invalid = !!(
+    phoneDigits(f.guest_phone).length < 9 ||
+    !f.guest_name.trim() ||
+    err.dates ||
+    !roomOk ||
+    err.deposit
+  )
+
+  const show = (k: Key, v: unknown) =>
+    k === 'start_date' || k === 'end_date'
+      ? fmtDate(String(v))
+      : k === 'room_id'
+        ? rooms.find((r) => r.id === v)?.name || ''
+        : k === 'price'
+          ? money(Number(v ?? room?.price ?? 0))
+          : k === 'status'
+            ? v === 'hold'
+              ? 'Giữ chỗ'
+              : 'Đã xác nhận'
+            : k === 'note' && String(v).length > 18
+              ? `${String(v).slice(0, 18)}…`
+              : String(v ?? '')
+  const changed = (Object.keys(LABELS) as Key[]).filter((k) => String(f[k] ?? '') !== String(orig[k] ?? ''))
+  const dirty = editing ? changed.length > 0 : !!(f.guest_name || f.guest_phone || deposit || f.note)
+
+  // Same phone as an earlier booking: offer that guest's name.
+  const digits = phoneDigits(f.guest_phone)
+  const before =
+    digits.length >= 9
+      ? bookings.filter((b) => b.id !== editing?.id && b.guest_name && phoneDigits(b.guest_phone) === digits)
+      : []
+  const match = before[0]?.guest_name !== f.guest_name ? before[0] : undefined
+
+  function save() {
+    if (invalid) return setTried(true)
+    const draft = {
+      ...f,
+      guest_name: f.guest_name.trim(),
+      room_id: f.room_id!,
+      payments: editing
+        ? editing.payments
+        : deposit
+          ? [{ amount: deposit, method: 'cash' as const, at: new Date().toISOString(), deposit: true }]
+          : [],
+    }
+    const result = editing ? actions.update(editing.id, draft) : actions.create(draft)
+    if (typeof result === 'string') return toast(result)
+    setSaved({
+      id: editing?.id ?? (result as number),
+      changes: changed.map((k) => [k, show(k, orig[k]), show(k, f[k])]),
+    })
+  }
+
+  const close = () => (dirty && !saved ? setDiscard(true) : navigate(-1))
+  const code = editing && bookingCode(editing)
+
+  if (saved) {
+    return (
+      <Screen>
+        <AppBar lead="close" onLead={() => navigate(-1)} title={editing ? `Đã lưu ${code}` : 'Đã lưu'} />
+        <main className="scroll">
+          <div className="sec" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {editing ? (
+              <>
+                <div className="ok-box" role="status">
+                  <b>Đã lưu {saved.changes.length} thay đổi</b>
+                  <span>Lịch phòng và số tiền còn thu đã được cập nhật.</span>
+                </div>
+                <dl className="panel">
+                  {saved.changes.map(([k, from, to]) => (
+                    <KV key={k} label={LABELS[k]}>
+                      {from} → {to}
+                    </KV>
+                  ))}
+                </dl>
+                <button type="button" className="btn btn-primary btn-block" onClick={() => navigate(-1)}>
+                  Về đặt phòng
+                </button>
+              </>
+            ) : (
+              <>
+                <div className="ok-box" role="status">
+                  <b>Đã lưu đặt phòng {bookingCode({ id: saved.id })}</b>
+                  <span>Lịch phòng đã được cập nhật.</span>
+                </div>
+                <dl className="panel">
+                  <KV label="Khách">{f.guest_name}</KV>
+                  <KV label="Phòng">Phòng {room?.name}</KV>
+                  <KV label="Ngày ở">
+                    {fmtDate(f.start_date)} – {fmtDate(f.end_date)} · {n} đêm
+                  </KV>
+                  <KV label="Tổng tiền">{money(total)}</KV>
+                  <KV label="Đã cọc">{money(paid)}</KV>
+                  <KV label="Còn phải thu" total>
+                    {money(due)}
+                  </KV>
+                </dl>
+                <A className="btn btn-primary btn-block" to="/calendar" replace>
+                  Xem trên lịch
+                </A>
+                <A className="btn btn-block" to={`/bookings/${saved.id}`} replace>
+                  Mở đặt phòng
+                </A>
+              </>
+            )}
+          </div>
+        </main>
+      </Screen>
+    )
+  }
+
   return (
-    <label className="block">
-      <span className="block text-base mb-2">{label}</span>
-      <input
-        type="date"
-        required
-        value={value}
-        onChange={(e) => e.target.value && onChange(e.target.value)}
-        className="w-full h-12 px-3 rounded-lg border border-solid border-[#8A8F94] bg-white text-base text-text font-[inherit] box-border"
+    <Screen>
+      <AppBar
+        lead="close"
+        onLead={close}
+        title={editing ? `Sửa ${code}` : 'Đặt phòng mới'}
+        sub={editing && `${editing.guest_name} · Phòng ${rooms.find((r) => r.id === editing.room_id)?.name}`}
       />
-    </label>
+      <main className="scroll">
+        <form onSubmit={(e) => (e.preventDefault(), save())}>
+          <Sec title="Khách">
+            <div className="panel form">
+              <Field label="Số điện thoại" error={err.phone} changed={changed.includes('guest_phone')}>
+                {(p) => (
+                  <input
+                    {...p}
+                    type="tel"
+                    inputMode="tel"
+                    autoComplete="tel"
+                    placeholder="09xx xxx xxx"
+                    value={f.guest_phone}
+                    onChange={(e) => set({ guest_phone: e.target.value })}
+                  />
+                )}
+              </Field>
+              {match && (
+                <div className="match">
+                  <span>
+                    Khách cũ: {match.guest_name} · đã đặt {before.length} lần
+                  </span>
+                  <button type="button" className="btn btn-sm" onClick={() => set({ guest_name: match.guest_name! })}>
+                    Dùng thông tin
+                  </button>
+                </div>
+              )}
+              <Field label="Tên khách" error={err.name} changed={changed.includes('guest_name')}>
+                {(p) => (
+                  <input
+                    {...p}
+                    type="text"
+                    autoComplete="name"
+                    value={f.guest_name}
+                    onChange={(e) => set({ guest_name: e.target.value })}
+                  />
+                )}
+              </Field>
+              <div className="grid2">
+                <Field label="Số khách" optional={!f.guests} changed={changed.includes('guests')}>
+                  {(p) => (
+                    <input
+                      {...p}
+                      type="number"
+                      min={1}
+                      inputMode="numeric"
+                      value={f.guests ?? ''}
+                      onChange={(e) => set({ guests: e.target.value ? Number(e.target.value) : undefined })}
+                    />
+                  )}
+                </Field>
+                <Field label="Nguồn" changed={changed.includes('origin')}>
+                  {(p) => (
+                    <select {...p} value={f.origin} onChange={(e) => set({ origin: e.target.value })}>
+                      {ORIGINS.map((o) => (
+                        <option key={o}>{o}</option>
+                      ))}
+                    </select>
+                  )}
+                </Field>
+              </div>
+            </div>
+          </Sec>
+
+          <Sec title="Lưu trú">
+            <div className="panel form">
+              <div className="grid2">
+                <Field label="Nhận phòng" changed={changed.includes('start_date')} error={err.dates && ' '}>
+                  {(p) => (
+                    <input
+                      {...p}
+                      type="date"
+                      value={f.start_date}
+                      disabled={staying}
+                      onChange={(e) =>
+                        e.target.value &&
+                        set({
+                          start_date: e.target.value,
+                          end_date: f.end_date <= e.target.value ? addDays(e.target.value, 1) : f.end_date,
+                        })
+                      }
+                    />
+                  )}
+                </Field>
+                <Field label="Trả phòng" changed={changed.includes('end_date')} error={err.dates && ' '}>
+                  {(p) => (
+                    <input
+                      {...p}
+                      type="date"
+                      value={f.end_date}
+                      onChange={(e) => e.target.value && set({ end_date: e.target.value })}
+                    />
+                  )}
+                </Field>
+              </div>
+              {err.dates && (
+                <div className="error" style={{ marginTop: -6 }}>
+                  {err.dates}
+                </div>
+              )}
+              <fieldset style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
+                <legend className="lbl" style={{ padding: 0, marginBottom: 6 }}>
+                  Phòng{' '}
+                  {datesOk && (
+                    <span className="opt">
+                      · {free.length} phòng trống {fmtDate(f.start_date)} – {fmtDate(f.end_date)}
+                    </span>
+                  )}
+                </legend>
+                <div className="rooms">
+                  {roomList.map((r) => {
+                    const isBusy = busy(r.id)
+                    const on = r.id === f.room_id
+                    const why = !datesOk ? '' : inMaintenance(r, f.start_date) ? 'bảo trì' : 'có khách'
+                    return (
+                      <label
+                        key={r.id}
+                        className={['room', on && (isBusy ? 'clash' : 'on'), isBusy && !on && 'busy']
+                          .filter(Boolean)
+                          .join(' ')}
+                      >
+                        <input
+                          type="radio"
+                          name="room"
+                          checked={on}
+                          disabled={isBusy && !on}
+                          aria-label={`Phòng ${r.name}${isBusy ? `, ${why || 'chưa chọn được ngày'}` : ', trống'}`}
+                          onChange={() => !isBusy && set({ room_id: r.id })}
+                        />
+                        <span>{r.name}</span>
+                        {isBusy && why && <small>{why}</small>}
+                      </label>
+                    )
+                  })}
+                </div>
+                {datesOk && !free.length && (
+                  <div className="help" style={{ marginTop: 8 }}>
+                    Không còn phòng trống trong các ngày này. Thử đổi ngày.
+                  </div>
+                )}
+                {err.room && (
+                  <div className="error" style={{ marginTop: 6 }}>
+                    {err.room}
+                  </div>
+                )}
+              </fieldset>
+              {!staying && (
+                <div className="field">
+                  <span className="lbl">Trạng thái</span>
+                  <Segmented
+                    label="Trạng thái"
+                    value={f.status}
+                    onChange={(status) => set({ status })}
+                    options={[
+                      ['confirmed', 'Đã xác nhận'],
+                      ['hold', 'Giữ chỗ'],
+                    ]}
+                  />
+                  {f.status === 'hold' && (
+                    <div className="help">Khách chưa chắc. Phòng vẫn được giữ tới khi xác nhận hoặc huỷ.</div>
+                  )}
+                </div>
+              )}
+            </div>
+          </Sec>
+
+          <Sec title="Thanh toán">
+            <div className="panel form">
+              <div className={editing ? undefined : 'grid2'}>
+                <Field
+                  label="Giá mỗi đêm (đ)"
+                  changed={changed.includes('price')}
+                  help={!owner && 'Chỉ chủ cơ sở đổi giá.'}
+                >
+                  {(p) => (
+                    <MoneyInput
+                      {...p}
+                      value={price || undefined}
+                      disabled={!owner}
+                      onChange={(v) => set({ price: v })}
+                    />
+                  )}
+                </Field>
+                {!editing && (
+                  <Field label="Đã cọc (đ)" optional error={err.deposit}>
+                    {(p) => <MoneyInput {...p} placeholder="0" value={deposit} onChange={setDeposit} />}
+                  </Field>
+                )}
+              </div>
+              {editing && (
+                <>
+                  <dl className="panel">
+                    <KV label="Tổng mới">{money(total)}</KV>
+                    <KV label="Đã thanh toán">{money(paid)}</KV>
+                    <KV label="Còn phải thu" total tone={due > 0 ? 'warn' : 'pos'}>
+                      {money(due)}
+                    </KV>
+                  </dl>
+                  <div className="help">Tiền đã thu được sửa ở phần Thanh toán của đặt phòng.</div>
+                </>
+              )}
+              <Field
+                label="Ghi chú"
+                optional
+                changed={changed.includes('note')}
+                help={<span style={{ display: 'block', textAlign: 'right' }}>{f.note.length}/500</span>}
+              >
+                {(p) => (
+                  <textarea {...p} maxLength={500} value={f.note} onChange={(e) => set({ note: e.target.value })} />
+                )}
+              </Field>
+            </div>
+          </Sec>
+          <div className="end" />
+        </form>
+      </main>
+
+      <div className="footer-bar">
+        <div className="sum">
+          {editing ? (
+            <>
+              <b>{changed.length ? `${changed.length} thay đổi` : 'Chưa có thay đổi'}</b>
+              <span>
+                Tổng {money(total)} · còn thu {money(due)}
+              </span>
+            </>
+          ) : (
+            <>
+              <b>{money(total)}</b>
+              <span>
+                {datesOk ? n : 0} đêm × {money(price)} · còn thu {money(due)}
+              </span>
+            </>
+          )}
+        </div>
+        <button type="button" className="btn btn-primary" disabled={!!editing && !changed.length} onClick={save}>
+          {editing ? 'Lưu thay đổi' : 'Lưu đặt phòng'}
+        </button>
+      </div>
+
+      {discard && (
+        <Sheet
+          title={editing ? `Bỏ ${changed.length} thay đổi chưa lưu?` : 'Bỏ đặt phòng đang nhập?'}
+          onClose={() => setDiscard(false)}
+        >
+          <p className="help">
+            {editing
+              ? `Đặt phòng ${code} sẽ giữ nguyên như trước khi sửa.`
+              : 'Thông tin bạn đã nhập sẽ không được lưu.'}
+          </p>
+          <button type="button" className="btn btn-danger btn-block" onClick={() => navigate(-1)}>
+            {editing ? 'Bỏ thay đổi' : 'Bỏ và thoát'}
+          </button>
+          <button type="button" className="btn btn-ghost btn-block" onClick={() => setDiscard(false)}>
+            {editing ? 'Tiếp tục sửa' : 'Tiếp tục nhập'}
+          </button>
+        </Sheet>
+      )}
+    </Screen>
   )
 }

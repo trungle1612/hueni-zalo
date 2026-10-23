@@ -1,231 +1,436 @@
-import dayjs from 'dayjs'
 import React, { useState } from 'react'
-import { Button, Header, Icon, Page, useNavigate } from 'zmp-ui'
+import { useNavigate } from 'zmp-ui'
 
-import { PageContainer } from '@/components'
-import { Card, PlacePicker, WarnIcon } from '@/modules/pms/components/ui'
+import {
+  A,
+  AppBar,
+  Badge,
+  Field,
+  Icon,
+  MoneyInput,
+  PHONE_ERROR,
+  phoneDigits,
+  Screen,
+  Sheet,
+  Tone,
+  useCurrent,
+  useRecord,
+} from '@/modules/pms/components/ui'
 import {
   addDays,
   Booking,
-  conflicts,
   daysBetween,
+  dueOf,
   fmtDate,
   fmtRange,
   guestLabel,
   isStaying,
-  placeRooms,
+  money,
+  nights,
+  occupiedUntil,
+  occupies,
+  paidOf,
+  Room,
+  sourceLabel,
   today,
-  usePlace,
   usePms,
+  weekday,
 } from '@/modules/pms/pms.store'
-import { PmsTabs } from '@/modules/pms/pms-tabs'
-import { clsx } from '@/utils/clsx'
 
-const DAYS = 14
-const COL = 56 // px per day: a thumb-sized cell, and room for a short name on a one-night bar
-const NAME_COL = 96
-const ROW = 64
+type BarTone = 'in' | 'ok' | 'warn' | 'out' | 'maint'
+const CHIP: Record<BarTone, Tone> = { in: 'primary', ok: 'info', warn: 'warning', out: 'neutral', maint: 'neutral' }
 
-type BarKind = 'confirmed' | 'hold' | 'ota' | 'out' | 'overdue'
-
-// Wiki §6c bar types, each with its own shape so colour is never the only cue.
-const BAR: Record<BarKind, { className: string; legend: string }> = {
-  confirmed: { className: 'bg-primary-pressed text-white', legend: 'Đã xác nhận' },
-  hold: { className: 'bg-amber-100 text-amber-950 border-2 border-dashed border-amber-600', legend: 'Giữ chỗ' },
-  ota: { className: 'bg-gray-200 text-gray-900', legend: 'OTA (chỉ xem)' },
-  out: { className: 'bg-white text-gray-700 border border-solid border-gray-400', legend: 'Đã trả phòng' },
-  overdue: { className: 'bg-red-50 text-red-900 border-2 border-solid border-red-600', legend: 'Quá hạn' },
+type Bar = {
+  key: string
+  row: number
+  start: string
+  until: string // exclusive; a stay ends mid-cell on its checkout morning
+  cont?: boolean // began before the week, or blocks the whole day
+  tone: BarTone
+  text: string
+  status: string
+  title: string
+  sub: string
+  booking?: Booking
 }
 
-function barOf(b: Booking): { kind: BarKind; until: string } {
-  if (b.checked_out_at) return { kind: 'out', until: b.end_date }
-  if (isStaying(b) && b.end_date < today()) return { kind: 'overdue', until: addDays(today(), 1) }
-  if (b.source === 'ical') return { kind: 'ota', until: b.end_date }
-  return { kind: b.status === 'hold' ? 'hold' : 'confirmed', until: b.end_date }
+function barOf(b: Booking, room: Room, row: number): Bar {
+  const until = occupiedUntil(b)
+  const due = dueOf(b, room)
+  const [tone, status]: [BarTone, string] = isStaying(b)
+    ? b.end_date <= today()
+      ? ['out', 'Trả hôm nay']
+      : ['in', 'Đang ở']
+    : b.checked_out_at
+      ? ['ok', 'Đã trả phòng']
+      : b.status === 'hold'
+        ? ['warn', 'Giữ chỗ']
+        : b.source === 'manual' && due > 0 && !paidOf(b, room)
+          ? ['warn', 'Chưa cọc']
+          : due > 0
+            ? ['ok', 'Đã cọc']
+            : ['ok', 'Đã thanh toán']
+  const words = guestLabel(b).split(/\s+/)
+  return {
+    key: `b${b.id}`,
+    row,
+    start: b.start_date,
+    until,
+    tone,
+    text: words.length > 2 ? words.slice(-2).join(' ') : guestLabel(b),
+    status,
+    title: guestLabel(b),
+    sub: `Phòng ${room.name} · ${fmtRange(b)} · ${nights(b)} đêm · ${sourceLabel(b)}`,
+    booking: b,
+  }
 }
 
 export default function CalendarPage() {
   const navigate = useNavigate()
-  const place = usePlace()
-  const { rooms, bookings } = usePms()
-  const [offset, setOffset] = useState(0)
-  const start = addDays(today(), offset)
-  const days = Array.from({ length: DAYS }, (_, i) => addDays(start, i))
-  const end = addDays(start, DAYS)
+  const bookings = usePms((s) => s.bookings)
+  const { rooms } = useCurrent()
+  const [off, setOff] = useState(0)
+  const [peek, setPeek] = useState<Bar>()
+  const [quick, setQuick] = useState<{ room: Room; date: string; maxN: number }>()
 
-  const roomList = placeRooms(rooms, place.id).filter((r) => r.active)
-  const roomIds = new Set(roomList.map((r) => r.id))
-  const clashes = conflicts(bookings).filter((c) => roomIds.has(c.ota.room_id))
-  const conflictIds = new Set(clashes.flatMap((c) => [c.ota.id, c.manual.id]))
+  // 5 days on a narrow phone so names stay readable, a week from 420px up.
+  const span = window.innerWidth < 420 ? 5 : 7
+  const ws = addDays(today(), span * off)
+  const we = addDays(ws, span)
+  const dates = Array.from({ length: span }, (_, i) => addDays(ws, i))
+  const cols = { gridTemplateColumns: `72px repeat(${span}, minmax(0, 1fr))` }
+
+  const bars: Bar[] = rooms.flatMap((room, i) => {
+    const row = i + 1
+    if (!room.active)
+      return [
+        {
+          key: `off${room.id}`,
+          row,
+          start: ws,
+          until: we,
+          cont: true,
+          tone: 'maint' as const,
+          text: 'Tạm ngưng',
+          status: 'Tạm ngưng',
+          title: `Phòng ${room.name} tạm ngưng`,
+          sub: 'Mở lại phòng trên trang quản trị hueni.',
+        },
+      ]
+    const list = bookings
+      .filter(
+        (b) =>
+          b.room_id === room.id &&
+          b.status !== 'cancelled' &&
+          b.start_date < we &&
+          (occupiedUntil(b) > ws || (isStaying(b) && occupiedUntil(b) >= ws)),
+      )
+      .map((b) => barOf(b, room, row))
+    const m = room.maintenance
+    if (m && m.until > ws && today() < we)
+      list.push({
+        key: `m${room.id}`,
+        row,
+        start: today(),
+        until: m.until,
+        cont: true,
+        tone: 'maint',
+        text: 'Bảo trì',
+        status: 'Bảo trì',
+        title: `Bảo trì phòng ${room.name}`,
+        sub: `${m.reason} · đến ${fmtDate(m.until)}`,
+      })
+    return list
+  })
+
+  // Free nights from this cell up to the next booking (or maintenance): quick-book can't overlap.
+  function openQuick(room: Room, date: string) {
+    if (date < today() || !room.active) return
+    const mine = bookings.filter((b) => b.room_id === room.id)
+    if (mine.some((b) => occupies(b, date, addDays(date, 1)))) return
+    if (room.maintenance && date < room.maintenance.until) return
+    const next = mine
+      .filter((b) => b.status !== 'cancelled' && b.start_date > date)
+      .map((b) => b.start_date)
+      .sort()[0]
+    setQuick({ room, date, maxN: Math.min(next ? daysBetween(date, next) : 30, 30) })
+  }
 
   return (
-    <>
-      <Page restoreScroll>
-        <Header title="Lịch phòng" showBackIcon={false} />
-        <PageContainer withHeader withBottomNav>
-          <div className="p-4 space-y-4">
-            <PlacePicker />
+    <Screen tab="/calendar">
+      <AppBar
+        title="Lịch phòng"
+        sub={`${fmtDate(ws)} – ${fmtDate(addDays(we, -1))}/${addDays(we, -1).slice(0, 4)} · ${rooms.length} phòng`}
+      >
+        {off !== 0 && (
+          <button type="button" className="text-btn" onClick={() => setOff(0)}>
+            Hôm nay
+          </button>
+        )}
+        <A className="icon-btn" to="/search" aria-label="Tìm đặt phòng">
+          <Icon name="search" />
+        </A>
+        <button
+          type="button"
+          className="icon-btn"
+          aria-label={span === 7 ? 'Tuần trước' : `${span} ngày trước`}
+          disabled={off <= -8}
+          onClick={() => setOff(off - 1)}
+        >
+          <Icon name="prev" />
+        </button>
+        <button
+          type="button"
+          className="icon-btn"
+          aria-label={span === 7 ? 'Tuần sau' : `${span} ngày sau`}
+          disabled={off >= 12}
+          onClick={() => setOff(off + 1)}
+        >
+          <Icon name="next" />
+        </button>
+      </AppBar>
 
-            {clashes.map(({ ota, manual }) => (
-              <div
-                key={`${ota.id}-${manual.id}`}
-                className="flex gap-2 items-start text-base bg-red-50 text-red-900 rounded-xl px-3 py-3"
-              >
-                <WarnIcon label="Trùng lịch" size={20} />
-                <span>
-                  <b>Trùng lịch phòng {rooms.find((r) => r.id === ota.room_id)?.name}:</b> {guestLabel(ota)}{' '}
-                  {fmtRange(ota)} trùng với {guestLabel(manual)}. Đổi ngày, đổi phòng hoặc huỷ đặt phòng nhập tay.
-                </span>
-              </div>
-            ))}
-
-            <div className="text-base font-semibold px-1">
-              {fmtDate(start)} – {fmtDate(addDays(end, -1))}
-            </div>
-
-            <Card className="overflow-x-auto">
-              <div style={{ width: NAME_COL + DAYS * COL }}>
-                <div className="flex border-0 border-b border-solid border-border">
-                  <div className="shrink-0 sticky left-0 bg-white z-20" style={{ width: NAME_COL }} />
-                  {days.map((d) => (
-                    <div key={d} className="shrink-0 text-center py-2" style={{ width: COL }}>
-                      <div className="text-sm text-text-secondary">{dayjs(d).format('dd')}</div>
-                      <div className={d === today() ? 'text-sm font-bold text-primary-pressed' : 'text-sm font-medium'}>
-                        {dayjs(d).format('DD/MM')}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                {roomList.map((room) => {
-                  const mine = bookings.filter(
-                    (b) => b.room_id === room.id && b.status !== 'cancelled' && b.start_date < end,
-                  )
-                  const leavingToday = mine.find((b) => isStaying(b) && b.end_date === today())
-                  const hasConflict = mine.some((b) => conflictIds.has(b.id))
-                  return (
-                    <div
-                      key={room.id}
-                      className="flex relative border-0 border-b border-solid border-border last:border-b-0"
-                      style={{ height: ROW }}
-                    >
-                      <div
-                        className="shrink-0 sticky left-0 bg-white z-20 px-3 flex flex-col justify-center border-0 border-r border-solid border-border"
-                        style={{ width: NAME_COL }}
-                      >
-                        <span className="flex items-center gap-1 text-base font-semibold truncate">
-                          {hasConflict && <WarnIcon label="Trùng lịch" />}
-                          {room.name}
-                        </span>
-                        {leavingToday && (
-                          <span className="text-sm text-text-secondary truncate">Trả: {guestLabel(leavingToday)}</span>
-                        )}
-                      </div>
-                      {/* Empty cells are a mouse/thumb shortcut; keyboard and screen readers use "Đặt phòng". */}
-                      {days.map((d) => (
-                        <button
-                          key={d}
-                          tabIndex={-1}
-                          aria-hidden
-                          disabled={d < today()}
-                          className={clsx(
-                            'shrink-0 h-full border-0 border-l border-solid border-border bg-transparent p-0',
-                            d === today() && 'bg-primary/5',
-                          )}
-                          style={{ width: COL }}
-                          onClick={() => navigate(`/bookings/new?room=${room.id}&start=${d}`)}
-                        />
-                      ))}
-                      {mine.map((b) => {
-                        const { kind, until } = barOf(b)
-                        const from = Math.max(0, daysBetween(start, b.start_date))
-                        const to = Math.min(DAYS, daysBetween(start, until))
-                        if (to <= from) return null
-                        const conflict = conflictIds.has(b.id)
-                        // Conflicting bars split the row (manual top, OTA bottom) so neither hides the other.
-                        const vertical = conflict
-                          ? b.source === 'ical'
-                            ? { top: ROW / 2 + 1, bottom: 4 }
-                            : { top: 4, bottom: ROW / 2 + 1 }
-                          : { top: 8, bottom: 8 }
-                        return (
-                          <button
-                            key={b.id}
-                            onClick={() => navigate(`/bookings/${b.id}`)}
-                            aria-label={`${guestLabel(b)}, ${fmtRange(b)}, ${BAR[kind].legend}${conflict ? ', trùng lịch' : ''}`}
-                            className={clsx(
-                              'absolute flex items-center gap-1 rounded-lg px-2 text-sm font-semibold text-left z-10 overflow-hidden whitespace-nowrap',
-                              BAR[kind].className,
-                              kind !== 'out' && kind !== 'overdue' && kind !== 'hold' && 'border-0',
-                              conflict && 'ring-2 ring-red-600 ring-offset-1',
-                            )}
-                            style={{ left: NAME_COL + from * COL + 2, width: (to - from) * COL - 4, ...vertical }}
-                          >
-                            {(conflict || b.removed_from_feed_at) && (
-                              <Icon icon="zi-warning-solid" size={14} className="shrink-0" />
-                            )}
-                            {kind === 'out' && <Icon icon="zi-check" size={14} className="shrink-0" />}
-                            <span className="truncate">
-                              {/* A one-night bar fits a given name (last word in Vietnamese), not "Anh M…". */}
-                              {to - from === 1 ? guestLabel(b).split(' ').pop() : guestLabel(b)}
-                              {kind === 'overdue' && ' · quá hạn'}
-                            </span>
-                          </button>
-                        )
-                      })}
-                    </div>
-                  )
-                })}
-              </div>
-            </Card>
-
-            {/* Navigation sits low, within thumb reach. */}
-            <div className="grid grid-cols-3 gap-2">
-              <Button
-                size="medium"
-                variant="secondary"
-                prefixIcon={<Icon icon="zi-chevron-left" />}
-                onClick={() => setOffset(offset - DAYS)}
-              >
-                Trước
-              </Button>
-              <Button size="medium" variant={offset ? 'secondary' : 'tertiary'} onClick={() => setOffset(0)}>
-                Hôm nay
-              </Button>
-              <Button
-                size="medium"
-                variant="secondary"
-                suffixIcon={<Icon icon="zi-chevron-right" />}
-                onClick={() => setOffset(offset + DAYS)}
-              >
-                Sau
-              </Button>
-            </div>
-            <Button
-              fullWidth
-              size="medium"
-              prefixIcon={<Icon icon="zi-plus" />}
-              onClick={() => navigate(`/bookings/new?place=${place.slug}`)}
-            >
-              Đặt phòng
-            </Button>
-
-            <ul className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm text-text-secondary px-1 list-none m-0">
-              {(Object.keys(BAR) as BarKind[]).map((k) => (
-                <li key={k} className="flex items-center gap-2">
-                  <span className={clsx('inline-block w-6 h-4 rounded shrink-0', BAR[k].className)} aria-hidden />
-                  {BAR[k].legend}
-                </li>
-              ))}
-              <li className="flex items-center gap-2">
-                <WarnIcon label="Trùng lịch" /> Trùng lịch
-              </li>
-            </ul>
-            <p className="text-base text-text-secondary px-1 m-0">Chạm ô trống trên lịch để đặt phòng ngày đó.</p>
+      <div className="days" style={cols} aria-hidden="true">
+        <div />
+        {dates.map((d) => (
+          <div key={d} className={d === today() ? 'day today' : d < today() ? 'day past' : 'day'}>
+            {weekday(d)}
+            <b>{Number(d.slice(8))}</b>
           </div>
-        </PageContainer>
-      </Page>
-      <PmsTabs active="/calendar" />
-    </>
+        ))}
+      </div>
+
+      <main className="scroll">
+        <div
+          className="grid"
+          style={cols}
+          role="group"
+          aria-label={`Lịch đặt phòng ${fmtDate(ws)} đến ${fmtDate(addDays(we, -1))}`}
+        >
+          {rooms.map((r, i) => (
+            <div
+              key={r.id}
+              className="grid-room"
+              style={{ gridRow: i + 1, borderTop: i ? '1px solid var(--border)' : 0 }}
+            >
+              {r.name}
+            </div>
+          ))}
+          {rooms.flatMap((r, i) =>
+            dates.map((d, di) => (
+              <button
+                key={`${r.id}-${d}`}
+                type="button"
+                tabIndex={-1}
+                className={d === today() ? 'cell today' : d < today() ? 'cell past' : 'cell'}
+                aria-label={`Phòng ${r.name}, ${fmtDate(d)}${d < today() ? ', đã qua' : ', đặt nhanh'}`}
+                style={{
+                  gridColumn: di + 2,
+                  gridRow: i + 1,
+                  borderTop: i ? '1px solid var(--border)' : 0,
+                  borderLeft: di ? '1px solid var(--border-subtle)' : 0,
+                }}
+                onClick={() => openQuick(r, d)}
+              />
+            )),
+          )}
+          {bars.map((b) => {
+            const s0 = daysBetween(ws, b.start) + 1
+            const e0 = daysBetween(ws, b.until) + 1
+            const cont = b.cont || s0 < 1
+            const st = Math.max(s0, 1)
+            const endHalf = e0 <= span
+            const cover = endHalf ? e0 - st + 1 : span + 1 - st
+            const unit = 100 / cover
+            return (
+              <button
+                key={b.key}
+                type="button"
+                className={`cal-bar ${b.tone}`}
+                aria-label={`${b.title}, ${b.sub}, ${b.status}`}
+                style={{
+                  gridColumn: `${st + 1} / span ${cover}`,
+                  gridRow: b.row,
+                  marginLeft: cont ? 1 : `${unit / 2}%`,
+                  marginRight: endHalf ? `${unit / 2}%` : 1,
+                }}
+                onClick={() => setPeek(b)}
+              >
+                {b.tone === 'warn' ? '! ' : ''}
+                {b.text}
+              </button>
+            )
+          })}
+        </div>
+        {!bars.some((b) => b.booking) && (
+          <p className="help" style={{ margin: '12px 16px 0' }}>
+            Chưa có đặt phòng nào trong tuần này.
+          </p>
+        )}
+        <div className="legend">
+          <span>
+            <i
+              className="sw"
+              style={{ background: 'var(--primary-faint)', border: '1px solid var(--primary-border)' }}
+            />
+            Đang ở
+          </span>
+          <span>
+            <i className="sw" style={{ background: 'var(--info-bg)', border: '1px solid var(--info-line)' }} />
+            Đã cọc
+          </span>
+          <span>
+            <i className="sw" style={{ background: 'var(--warn-bg)', border: '1px solid var(--warn-line)' }} />! Chưa
+            cọc
+          </span>
+          <span>
+            <i className="sw" style={{ border: '1px dashed var(--text-2)' }} />
+            Trả hôm nay
+          </span>
+          <span>
+            <i className="sw" style={{ background: 'var(--muted-bg)' }} />
+            Bảo trì
+          </span>
+          <span style={{ flexBasis: '100%' }}>Chạm thanh để xem chi tiết, chạm ô trống để đặt nhanh.</span>
+        </div>
+      </main>
+
+      {peek && (
+        <Sheet title={peek.title} onClose={() => setPeek(undefined)}>
+          <div style={{ marginTop: -6 }}>
+            <Badge tone={CHIP[peek.tone]}>{peek.status}</Badge>
+          </div>
+          <p className="help">{peek.sub}</p>
+          {peek.booking && (
+            <p className="help">
+              {peek.tone === 'warn' && 'Dấu ! trên lịch: chưa nhận tiền cọc. '}
+              {peek.tone === 'out' && 'Viền nét đứt: khách trả phòng sáng nay. '}
+              Thanh bắt đầu từ chiều ngày nhận phòng và hết vào sáng ngày trả phòng, nên một phòng có thể trả và nhận
+              khách cùng ngày.
+            </p>
+          )}
+          {peek.booking && (
+            <button
+              type="button"
+              className="btn btn-primary btn-block"
+              onClick={() => (setPeek(undefined), navigate(`/bookings/${peek.booking!.id}`))}
+            >
+              Mở đặt phòng
+            </button>
+          )}
+          <button type="button" className="btn btn-ghost btn-block" onClick={() => setPeek(undefined)}>
+            Đóng
+          </button>
+        </Sheet>
+      )}
+      {quick && <QuickBook {...quick} onClose={() => setQuick(undefined)} />}
+    </Screen>
+  )
+}
+
+function QuickBook({ room, date, maxN, onClose }: { room: Room; date: string; maxN: number; onClose: () => void }) {
+  const actions = usePms((s) => s.actions)
+  const record = useRecord()
+  const [name, setName] = useState('')
+  const [phone, setPhone] = useState('')
+  const [n, setN] = useState(1)
+  const [more, setMore] = useState(false)
+  const [price, setPrice] = useState<number | undefined>(room.price)
+  const [deposit, setDeposit] = useState<number>()
+  const [tried, setTried] = useState(false)
+  const [error, setError] = useState<string>()
+
+  const total = n * (price || 0)
+  const nameErr = tried && !name.trim() && 'Nhập tên khách.'
+  const phoneErr = tried && phoneDigits(phone).length < 9 && PHONE_ERROR
+  const depErr = !!deposit && deposit > total && `Tiền cọc không được lớn hơn tổng ${money(total)}.`
+
+  function save() {
+    if (!name.trim() || phoneDigits(phone).length < 9 || depErr) {
+      setTried(true)
+      if (depErr) setMore(true)
+      return
+    }
+    const err = record(() => {
+      const id = actions.create({
+        room_id: room.id,
+        start_date: date,
+        end_date: addDays(date, n),
+        status: 'confirmed',
+        guest_name: name.trim(),
+        guest_phone: phone,
+        price: price === room.price ? undefined : price,
+        origin: 'Trực tiếp',
+        payments: deposit ? [{ amount: deposit, method: 'cash', at: new Date().toISOString(), deposit: true }] : [],
+      })
+      if (typeof id === 'string') return id
+    }, `Đã đặt phòng ${room.name} cho ${name.trim()}`)
+    if (err) setError(err)
+    else onClose()
+  }
+
+  return (
+    <Sheet title={`Đặt nhanh phòng ${room.name}`} onClose={onClose}>
+      <p className="help" style={{ marginTop: -8 }}>
+        {fmtDate(date)} – {fmtDate(addDays(date, n))} · {money(total)}
+      </p>
+      {error && (
+        <div className="alert" role="alert">
+          {error}
+        </div>
+      )}
+      <Field label="Tên khách" error={nameErr}>
+        {(p) => (
+          <input {...p} type="text" placeholder="Nguyễn Văn A" value={name} onChange={(e) => setName(e.target.value)} />
+        )}
+      </Field>
+      <Field label="Số điện thoại" error={phoneErr}>
+        {(p) => (
+          <input
+            {...p}
+            type="tel"
+            inputMode="tel"
+            placeholder="09xx xxx xxx"
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+          />
+        )}
+      </Field>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+        <div>
+          <div className="lbl">Số đêm</div>
+          <div className="help">
+            {n >= maxN && maxN < 30 ? `Tối đa ${maxN} đêm, sau đó phòng đã có khách.` : `${money(price || 0)} mỗi đêm`}
+          </div>
+        </div>
+        <div className="stepper">
+          <button type="button" aria-label="Giảm số đêm" disabled={n <= 1} onClick={() => setN(n - 1)}>
+            −
+          </button>
+          <output aria-live="polite">{n} đêm</output>
+          <button type="button" aria-label="Tăng số đêm" disabled={n >= maxN} onClick={() => setN(n + 1)}>
+            +
+          </button>
+        </div>
+      </div>
+      <button type="button" className="more" aria-expanded={more} onClick={() => setMore(!more)}>
+        <span>{more ? 'Ẩn giá và cọc' : 'Thêm giá và cọc'}</span>
+        <span aria-hidden="true">{more ? '−' : '+'}</span>
+      </button>
+      {more && (
+        <div className="grid2">
+          <Field label="Giá mỗi đêm (đ)">{(p) => <MoneyInput {...p} value={price} onChange={setPrice} />}</Field>
+          <Field label="Đã cọc (đ)" optional error={depErr}>
+            {(p) => <MoneyInput {...p} placeholder="0" value={deposit} onChange={setDeposit} />}
+          </Field>
+        </div>
+      )}
+      <button type="button" className="btn btn-primary btn-block" onClick={save}>
+        Đặt phòng
+      </button>
+      <button type="button" className="btn btn-ghost btn-block" onClick={onClose}>
+        Đóng
+      </button>
+    </Sheet>
   )
 }

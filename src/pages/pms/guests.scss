@@ -1,0 +1,28 @@
+// Phiếu tính tiền and Tin nhắn tự động: the few pieces pms.scss has no class for.
+.pms {
+  .amt {
+    flex: none;
+    font-weight: 600;
+    white-space: nowrap;
+
+    &.pos {
+      color: var(--pos);
+    }
+  }
+  // A template row: name, timing and approval status stacked, the switch beside it.
+  .row-main.tpl {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0;
+    font-family: inherit;
+  }
+  .t2.warn {
+    color: var(--warn);
+  }
+  .bubble {
+    padding: 10px 12px;
+    border-radius: 12px 12px 12px 2px;
+    background: var(--muted-bg);
+    white-space: pre-wrap;
+  }
+}

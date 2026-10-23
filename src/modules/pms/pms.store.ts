@@ -16,9 +16,31 @@ export type Room = {
   price?: number
   active: boolean
   housekeeping: 'clean' | 'dirty'
+  maintenance?: { reason: string; until: string } // blocked from today until `until` (exclusive, like end_date)
+  floor?: number
+  kind?: string // loại phòng: Phòng đôi, Phòng gia đình…
+  weekend_price?: number // Friday and Saturday nights, when different
+  amenities?: string[]
+  note?: string // internal, staff only
+  updated_at?: string
 }
 
-export type Provider = 'airbnb' | 'booking' | 'other'
+export type Provider = 'airbnb' | 'booking' | 'agoda' | 'other'
+
+export type PayMethod = 'cash' | 'bank' | 'card'
+// amount < 0 = a refund
+export type Payment = { amount: number; method: PayMethod; at: string; deposit?: boolean; by?: string }
+// A service added to the bill (Phiếu tính tiền): unit price × qty.
+export type Charge = { id: number; name: string; unit: string; price: number; qty: number; at: string }
+// One guest's papers for lưu trú: only what the declaration needs, never the photo.
+export type GuestDoc = {
+  name: string
+  kind: 'vn' | 'foreign'
+  id_tail: string // last 4 digits: the full number is never shown in lists
+  status: 'ready' | 'sent' | 'ok' | 'error'
+  problem?: string
+  at?: string
+}
 
 export type Booking = {
   id: number
@@ -32,6 +54,14 @@ export type Booking = {
   guest_phone?: string
   guests?: number
   note?: string
+  origin?: string // how a manual booking came in: Trực tiếp, Điện thoại / Zalo…
+  price?: number // per night, fixed when the room's price changes later; else the room's price
+  weekend_price?: number // Friday/Saturday nights, fixed together with `price`
+  payments?: Payment[]
+  charges?: Charge[]
+  discount?: { amount: number; reason: string }
+  group_id?: number // Đặt phòng theo đoàn: one booking per room, one contact
+  docs?: GuestDoc[]
   checked_in_at?: string
   checked_out_at?: string
   declared_at?: string
@@ -76,7 +106,11 @@ export const addDays = (date: string, n: number) => fmt(dayjs(date).add(n, 'day'
 export const daysBetween = (from: string, to: string) => dayjs(to).diff(from, 'day')
 export const fmtDate = (s: string) => dayjs(s).format('DD/MM')
 export const fmtRange = (b: Pick<Booking, 'start_date' | 'end_date'>) =>
-  `${fmtDate(b.start_date)}–${fmtDate(b.end_date)}`
+  `${fmtDate(b.start_date)} – ${fmtDate(b.end_date)}`
+const WEEKDAY = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7']
+export const weekday = (s: string) => WEEKDAY[dayjs(s).day()]
+export const fmtDay = (s: string) => `${weekday(s)} ${fmtDate(s)}` // T4 21/10
+export const fmtTime = (iso: string) => dayjs(iso).format('DD/MM HH:mm')
 export const nights = (b: Pick<Booking, 'start_date' | 'end_date'>) => daysBetween(b.start_date, b.end_date)
 const isToday = (iso?: string) => !!iso && dayjs(iso).isSame(dayjs(), 'day')
 const nowIso = () => new Date().toISOString()
@@ -84,11 +118,52 @@ const hoursAgo = (h: number) => dayjs().subtract(h, 'hour').toISOString()
 
 // ---------- booking rules (copies of hueni-api Booking) ----------
 
-export const PROVIDER_NAME: Record<Provider, string> = { airbnb: 'Airbnb', booking: 'Booking.com', other: 'iCal' }
+export const PROVIDER_NAME: Record<Provider, string> = {
+  airbnb: 'Airbnb',
+  booking: 'Booking.com',
+  agoda: 'Agoda',
+  other: 'iCal',
+}
 export const sourceLabel = (b: Booking) => (b.source === 'manual' ? 'Trực tiếp' : PROVIDER_NAME[b.provider || 'other'])
 export const guestLabel = (b: Booking) => b.guest_name || b.note || (b.source === 'ical' ? sourceLabel(b) : 'Khách')
 export const isStaying = (b: Booking) => !!b.checked_in_at && !b.checked_out_at
 const isBlocking = (b: Booking) => b.status !== 'cancelled'
+export const bookingCode = (b: Pick<Booking, 'id'>) => `DP-${String(b.id).padStart(4, '0')}`
+export const money = (n: number) => `${n < 0 ? '−' : ''}${String(Math.abs(n)).replace(/\B(?=(\d{3})+(?!\d))/g, '.')}đ`
+export const inMaintenance = (r: Room, from = today()) => !!r.maintenance && from < r.maintenance.until
+// One definition for every screen: rooms that take guests tonight, and rooms that need cleaning (guest in or not).
+export const isOpen = (r: Room) => r.active && !inMaintenance(r)
+export const needsCleaning = (r: Room) => isOpen(r) && r.housekeeping === 'dirty'
+
+// Money: OTA bookings are paid on the OTA; manual ones by the payments recorded here.
+// ponytail: total = nights + services − discount; taxes come with the API.
+export const nightPrice = (b: Booking, room?: Room) => b.price ?? room?.price ?? 0
+const isWeekendNight = (date: string) => [5, 6].includes(dayjs(date).day()) // Fri, Sat
+// The price of one night: Friday and Saturday use the weekend price when there is one.
+export const priceOn = (b: Booking, room: Room | undefined, date: string) => {
+  const weekend = b.price !== undefined ? b.weekend_price : room?.weekend_price
+  return isWeekendNight(date) && weekend ? weekend : nightPrice(b, room)
+}
+const nightDates = (b: Pick<Booking, 'start_date' | 'end_date'>) =>
+  Array.from({ length: Math.max(0, nights(b)) }, (_, i) => fmt(dayjs(b.start_date).add(i, 'day')))
+export const roomTotalOf = (b: Booking, room?: Room) => nightDates(b).reduce((n, d) => n + priceOn(b, room, d), 0)
+export const chargesOf = (b: Booking) => (b.charges || []).reduce((n, c) => n + c.price * c.qty, 0)
+export const totalOf = (b: Booking, room?: Room) =>
+  roomTotalOf(b, room) + (b.source === 'ical' ? 0 : chargesOf(b) - (b.discount?.amount || 0))
+export const hasWeekendPrice = (b: Booking, room?: Room) =>
+  nightDates(b).some((d) => priceOn(b, room, d) !== nightPrice(b, room))
+export const paidOf = (b: Booking, room?: Room) =>
+  b.source === 'ical' ? totalOf(b, room) : (b.payments || []).reduce((n, p) => n + p.amount, 0)
+export const dueOf = (b: Booking, room?: Room) =>
+  b.status === 'cancelled' ? 0 : Math.max(0, totalOf(b, room) - paidOf(b, room))
+export const PAY_METHOD: Record<PayMethod, string> = { cash: 'Tiền mặt', bank: 'Chuyển khoản', card: 'Thẻ' }
+export const ROOM_KINDS = ['Phòng đôi', 'Phòng 2 giường', 'Phòng gia đình', 'Phòng đơn']
+export const AMENITIES = ['Máy lạnh', 'Cửa sổ', 'Ban công', 'Bồn tắm', 'Bếp nhỏ', 'Bàn làm việc']
+// Bookings still ahead (or in house) on a room: they block deleting it and keep their price when it changes.
+export const upcomingOn = (all: Booking[], roomId: number) =>
+  all
+    .filter((b) => b.room_id === roomId && b.status !== 'cancelled' && !b.checked_out_at && b.end_date > today())
+    .sort((a, b) => a.start_date.localeCompare(b.start_date))
 
 // Booking#occupied_until: checked out → free from the checkout day; still in after departure → through today.
 export function occupiedUntil(b: Booking) {
@@ -127,7 +202,7 @@ export function roomDay(room: Room, all: Booking[]): RoomDay {
   const booking = staying || arriving
   const next = mine.find((b) => b !== booking && !b.checked_in_at && b.start_date >= date)
   let state: RoomState = 'free'
-  if (!room.active) state = 'off'
+  if (!room.active || inMaintenance(room)) state = 'off'
   else if (staying) state = staying.end_date <= date ? 'leaving' : 'occupied'
   else if (arriving) state = arriving.status === 'confirmed' ? 'arriving' : 'held'
   return { room, state, booking, next }
@@ -172,17 +247,6 @@ export const FEED_ERROR: Record<NonNullable<Feed['last_error']>, string> = {
   fetch: 'Không tải được lịch lúc này. hueni tự thử lại mỗi giờ.',
 }
 
-// Colour meaning (one job per hue): green free, blue guest in, violet expected, amber hold,
-// stone needs cleaning / off, red only for overdue, late, conflict and errors.
-export const STATE_STYLE: Record<RoomState, { label: string; badge: string; dot: string }> = {
-  free: { label: 'Trống', badge: 'bg-emerald-100 text-emerald-900', dot: 'bg-emerald-600' },
-  occupied: { label: 'Đang có khách', badge: 'bg-sky-100 text-sky-900', dot: 'bg-sky-600' },
-  leaving: { label: 'Trả phòng hôm nay', badge: 'bg-sky-100 text-sky-900', dot: 'bg-sky-600' },
-  arriving: { label: 'Chờ khách', badge: 'bg-violet-100 text-violet-900', dot: 'bg-violet-600' },
-  held: { label: 'Giữ chỗ', badge: 'bg-amber-100 text-amber-900', dot: 'bg-amber-500' },
-  off: { label: 'Tạm ngưng', badge: 'bg-stone-200 text-stone-800', dot: 'bg-stone-400' },
-}
-
 // Plain-language "when" so nobody has to do date arithmetic.
 export function whenLabel(b: Booking) {
   const t = today()
@@ -214,12 +278,78 @@ const places: Place[] = [
 ]
 
 const rooms: Room[] = [
-  { id: 1, place_id: 1, name: '101', max_guests: 2, price: 450000, active: true, housekeeping: 'clean' },
-  { id: 2, place_id: 1, name: '102', max_guests: 2, price: 450000, active: true, housekeeping: 'dirty' },
-  { id: 3, place_id: 1, name: 'Garden', max_guests: 4, price: 700000, active: true, housekeeping: 'clean' },
-  { id: 4, place_id: 1, name: 'Sen', max_guests: 3, price: 600000, active: true, housekeeping: 'clean' },
-  { id: 5, place_id: 1, name: 'Gác mái', max_guests: 2, price: 350000, active: false, housekeeping: 'clean' },
-  { id: 6, place_id: 2, name: 'Limdim', max_guests: 4, price: 800000, active: true, housekeeping: 'clean' },
+  {
+    id: 1,
+    place_id: 1,
+    name: '101',
+    floor: 1,
+    kind: 'Phòng đôi',
+    amenities: ['Máy lạnh', 'Cửa sổ'],
+    max_guests: 2,
+    price: 450000,
+    active: true,
+    housekeeping: 'clean',
+  },
+  {
+    id: 2,
+    place_id: 1,
+    name: '102',
+    floor: 1,
+    kind: 'Phòng đôi',
+    amenities: ['Máy lạnh'],
+    max_guests: 2,
+    price: 450000,
+    active: true,
+    housekeeping: 'dirty',
+  },
+  {
+    id: 3,
+    place_id: 1,
+    name: 'Garden',
+    floor: 1,
+    kind: 'Phòng gia đình',
+    weekend_price: 850000,
+    amenities: ['Máy lạnh', 'Cửa sổ', 'Bếp nhỏ'],
+    note: 'Cửa ra sân vườn, hợp khách có trẻ nhỏ.',
+    max_guests: 4,
+    price: 700000,
+    active: true,
+    housekeeping: 'clean',
+  },
+  {
+    id: 4,
+    place_id: 1,
+    name: 'Sen',
+    floor: 2,
+    kind: 'Phòng 2 giường',
+    amenities: ['Máy lạnh', 'Ban công'],
+    max_guests: 3,
+    price: 600000,
+    active: true,
+    housekeeping: 'clean',
+  },
+  {
+    id: 5,
+    place_id: 1,
+    name: 'Gác mái',
+    floor: 3,
+    kind: 'Phòng đôi',
+    amenities: ['Cửa sổ'],
+    max_guests: 2,
+    price: 350000,
+    active: true,
+    housekeeping: 'clean',
+    maintenance: { reason: 'Thay máy lạnh', until: day(3) },
+  },
+  {
+    id: 6,
+    place_id: 2,
+    name: 'Limdim',
+    max_guests: 4,
+    price: 800000,
+    active: true,
+    housekeeping: 'clean',
+  },
   { id: 7, place_id: 2, name: 'Mây', max_guests: 2, active: true, housekeeping: 'clean' },
 ]
 
@@ -234,6 +364,7 @@ const bookings: Booking[] = [
     source: 'manual',
     guest_name: 'Chị Mai',
     guests: 2,
+    payments: [{ amount: 1350000, method: 'cash', at: hoursAgo(648) }],
     checked_in_at: hoursAgo(720),
     checked_out_at: hoursAgo(648),
   },
@@ -269,6 +400,8 @@ const bookings: Booking[] = [
     guest_name: 'Anh Nam',
     guest_phone: '0912345678',
     guests: 2,
+    origin: 'Điện thoại / Zalo',
+    payments: [{ amount: 300000, method: 'cash', at: hoursAgo(120), deposit: true }],
     checked_in_at: hoursAgo(48),
     declared_at: hoursAgo(47),
   },
@@ -293,6 +426,8 @@ const bookings: Booking[] = [
     source: 'manual',
     guest_name: 'Chị Bình',
     guest_phone: '0987654321',
+    guests: 2,
+    payments: [{ amount: 500000, method: 'bank', at: hoursAgo(50), deposit: true }],
     note: 'Đến khoảng 21h',
   },
   {
@@ -314,6 +449,8 @@ const bookings: Booking[] = [
     source: 'manual',
     guest_name: 'Chị Hoa',
     guests: 3,
+    guest_phone: '0905111222',
+    payments: [{ amount: 1000000, method: 'bank', at: hoursAgo(26), deposit: true }],
   },
   { id: 7, room_id: 4, start_date: day(5), end_date: day(7), status: 'confirmed', source: 'ical', provider: 'airbnb' },
   {
@@ -335,6 +472,7 @@ const bookings: Booking[] = [
     guest_name: 'Mr. Kim',
     guest_phone: '+82 10-1234-5678',
     guests: 2,
+    payments: [{ amount: 2400000, method: 'card', at: hoursAgo(96) }],
     checked_in_at: hoursAgo(96),
   },
   {
@@ -346,6 +484,7 @@ const bookings: Booking[] = [
     source: 'manual',
     guest_name: 'Em Lan',
     guests: 1,
+    price: 300000,
   },
   {
     id: 11,
@@ -356,6 +495,7 @@ const bookings: Booking[] = [
     source: 'manual',
     guest_name: 'Cô Thu',
     guests: 2,
+    payments: [{ amount: 2100000, method: 'cash', at: hoursAgo(72) }],
     checked_in_at: hoursAgo(144),
     checked_out_at: hoursAgo(72),
   },
@@ -504,9 +644,17 @@ const activities: Activity[] = [
 
 type Result = string | void // error message; nothing = ok
 type Draft = Omit<Booking, 'id' | 'source' | 'status'> & { status: 'hold' | 'confirmed' }
+export type RoomDraft = Pick<
+  Room,
+  'place_id' | 'name' | 'floor' | 'kind' | 'max_guests' | 'price' | 'weekend_price' | 'amenities' | 'active' | 'note'
+>
+
+type Snapshot = Pick<State, 'bookings' | 'rooms' | 'activities'>
 
 type State = {
   user: { name: string }
+  signedIn: boolean
+  recent: number[] // booking ids opened lately, newest first (Tìm đặt phòng)
   places: Place[]
   rooms: Room[]
   bookings: Booking[]
@@ -514,23 +662,39 @@ type State = {
   activities: Activity[]
   currentSlug: string
   actions: {
+    signIn: () => void
+    signOut: () => void
     setPlace: (slug: string) => void
+    opened: (id: number) => void
+    snapshot: () => Snapshot
+    restore: (snap: Snapshot) => void
     checkIn: (id: number, guests?: number) => Result
     earlyCheckIn: (id: number) => Result
     checkOut: (id: number) => Result
     undoCheckIn: (id: number) => Result
     undoCheckOut: (id: number) => Result
-    noShow: (id: number) => Result
-    cancel: (id: number) => Result
+    cancel: (id: number, reason: string) => Result
+    uncancel: (id: number) => Result
     confirm: (id: number) => Result
+    pay: (id: number, amount: number, method: PayMethod) => Result
     declare: (id: number) => Result
-    undeclare: (id: number) => Result
     move: (id: number, roomId: number) => Result
     clean: (roomId: number) => Result
-    unclean: (roomId: number) => Result
+    setRoomStatus: (roomId: number, status: 'ready' | 'dirty' | 'off', maintenance?: Room['maintenance']) => Result
     create: (draft: Draft) => number | string
     update: (id: number, draft: Draft) => Result
+    saveRoom: (draft: RoomDraft, id?: number) => number | string
+    deleteRoom: (id: number) => Result
     sync: (feedId: number) => Result
+  }
+}
+
+const SIGNED_IN = 'pms.signedIn'
+const remembered = () => {
+  try {
+    return localStorage.getItem(SIGNED_IN) === '1'
+  } catch {
+    return false
   }
 }
 
@@ -546,7 +710,7 @@ export const usePms = create<State>((set, get) => {
       activities: [
         ...s.activities,
         {
-          id: s.activities.length + 1,
+          id: Math.max(0, ...s.activities.map((a) => a.id)) + 1,
           place_id: room(roomId).place_id,
           room_id: roomId,
           booking_id: bookingId,
@@ -563,6 +727,8 @@ export const usePms = create<State>((set, get) => {
 
   return {
     user: { name: 'Chị Hoa' },
+    signedIn: remembered(),
+    recent: [],
     places,
     rooms,
     bookings,
@@ -570,7 +736,33 @@ export const usePms = create<State>((set, get) => {
     activities,
     currentSlug: places[0].slug,
     actions: {
+      // ponytail: no real sign-in yet; becomes zmp-sdk getAccessToken → hueni-api (PRODUCT.md: Zalo identity).
+      signIn: () => {
+        try {
+          localStorage.setItem(SIGNED_IN, '1')
+        } catch {
+          // private mode: signed in for this session only
+        }
+        set({ signedIn: true })
+      },
+      signOut: () => {
+        try {
+          localStorage.removeItem(SIGNED_IN)
+        } catch {
+          // nothing stored
+        }
+        set({ signedIn: false })
+      },
       setPlace: (slug) => set({ currentSlug: slug }),
+      opened: (id) => set((s) => ({ recent: [id, ...s.recent.filter((x) => x !== id)].slice(0, 5) })),
+
+      // Hoàn tác puts everything back as it was, history included.
+      // ponytail: mock-only; with the API each undo becomes its own request.
+      snapshot: () => {
+        const { bookings, rooms, activities } = get()
+        return { bookings, rooms, activities }
+      },
+      restore: (snap) => set(snap),
 
       checkIn: (id, guests) => {
         const b = booking(id)
@@ -598,6 +790,7 @@ export const usePms = create<State>((set, get) => {
         stayLog(b, 'Trả phòng')
       },
 
+      // Owner-only, same day: the API's undo, beyond the 6-second Hoàn tác.
       undoCheckIn: (id) => {
         const b = booking(id)
         if (!isStaying(b) || !isToday(b.checked_in_at)) return 'Chỉ hoàn tác được trong ngày'
@@ -616,18 +809,33 @@ export const usePms = create<State>((set, get) => {
         stayLog(b, 'Hoàn tác trả phòng')
       },
 
-      noShow: (id) => {
-        const b = booking(id)
-        if (b.source !== 'manual' || b.checked_in_at) return 'Chỉ dùng cho đặt phòng nhập tay chưa nhận phòng'
-        patch(id, { status: 'cancelled', note: [b.note, 'Không đến'].filter(Boolean).join(' · ') })
-        log(b.room_id, 'booking', 'Huỷ', `${guestLabel(b)} · Không đến`, id)
-      },
-
-      cancel: (id) => {
+      cancel: (id, reason) => {
         const b = booking(id)
         if (b.checked_in_at) return 'Khách đã nhận phòng, không huỷ được'
         patch(id, { status: 'cancelled' })
-        log(b.room_id, 'booking', 'Huỷ', `${guestLabel(b)} ${fmtRange(b)}`, id)
+        log(b.room_id, 'booking', 'Huỷ', `${guestLabel(b)} ${fmtRange(b)} · ${reason}`, id)
+      },
+
+      uncancel: (id) => {
+        const b = booking(id)
+        if (b.status !== 'cancelled' || b.source !== 'manual') return 'Không khôi phục được đặt phòng này'
+        const problem = dateProblem(get().bookings, b, id)
+        if (problem) return problem
+        patch(id, { status: 'confirmed' })
+        log(b.room_id, 'booking', 'Khôi phục', `${guestLabel(b)} ${fmtRange(b)}`, id)
+      },
+
+      pay: (id, amount, method) => {
+        const b = booking(id)
+        if (!amount) return 'Nhập số tiền khác 0.'
+        patch(id, { payments: [...(b.payments || []), { amount, method, at: nowIso() }] })
+        log(
+          b.room_id,
+          'booking',
+          amount > 0 ? 'Thu tiền' : 'Hoàn tiền',
+          `${money(Math.abs(amount))}, ${PAY_METHOD[method].toLowerCase()}`,
+          id,
+        )
       },
 
       confirm: (id) => {
@@ -640,13 +848,6 @@ export const usePms = create<State>((set, get) => {
         const b = booking(id)
         patch(id, { declared_at: nowIso() })
         stayLog(b, 'Khai báo lưu trú')
-      },
-
-      // Snackbar "Hoàn tác" for one-tap records, open to staff too.
-      undeclare: (id) => {
-        const b = booking(id)
-        patch(id, { declared_at: undefined })
-        stayLog(b, 'Hoàn tác khai báo lưu trú')
       },
 
       move: (id, roomId) => {
@@ -664,9 +865,15 @@ export const usePms = create<State>((set, get) => {
         log(roomId, 'room', 'Dọn xong')
       },
 
-      unclean: (roomId) => {
-        patchRoom(roomId, { housekeeping: 'dirty' })
-        log(roomId, 'room', 'Hoàn tác dọn xong')
+      setRoomStatus: (roomId, status, maintenance) => {
+        if (get().bookings.some((b) => b.room_id === roomId && isStaying(b)))
+          return 'Phòng đang có khách. Đổi tình trạng được sau khi trả phòng.'
+        if (status === 'off' && !maintenance?.reason.trim()) return 'Nhập lý do để nhân viên khác biết.'
+        patchRoom(roomId, {
+          housekeeping: status === 'dirty' ? 'dirty' : 'clean',
+          maintenance: status === 'off' ? maintenance : undefined,
+        })
+        log(roomId, 'room', { ready: 'Sẵn sàng', dirty: 'Cần dọn', off: 'Bảo trì' }[status], maintenance?.reason)
       },
 
       create: (draft) => {
@@ -691,6 +898,49 @@ export const usePms = create<State>((set, get) => {
         if (problem) return problem
         patch(id, draft)
         log(draft.room_id, 'booking', 'Sửa đặt phòng', guestLabel(booking(id)), id)
+      },
+
+      // Owner-only setup (a copy of the web admin's rules until the API takes over).
+      saveRoom: (draft, id) => {
+        const name = draft.name.trim()
+        if (!name) return 'Nhập số phòng.'
+        const taken = get().rooms.some(
+          (r) => r.id !== id && r.place_id === draft.place_id && r.name.toLowerCase() === name.toLowerCase(),
+        )
+        if (taken) return `Phòng ${name} đã có. Chọn số khác.`
+        if (!draft.price || draft.price <= 0) return 'Nhập giá mỗi đêm lớn hơn 0.'
+        if (id === undefined) {
+          const newId = Math.max(0, ...get().rooms.map((r) => r.id)) + 1
+          set((s) => ({
+            rooms: [...s.rooms, { ...draft, name, id: newId, housekeeping: 'clean', updated_at: nowIso() }],
+          }))
+          log(newId, 'room', 'Thêm phòng', name)
+          return newId
+        }
+        const old = room(id)
+        // A new price is for bookings made after saving: the ones ahead keep what they were quoted.
+        if (old.price !== draft.price || old.weekend_price !== draft.weekend_price) {
+          const keep = new Set(
+            upcomingOn(get().bookings, id)
+              .filter((b) => b.price === undefined)
+              .map((b) => b.id),
+          )
+          set((s) => ({
+            bookings: s.bookings.map((b) =>
+              keep.has(b.id) ? { ...b, price: old.price, weekend_price: old.weekend_price } : b,
+            ),
+          }))
+        }
+        patchRoom(id, { ...draft, name, updated_at: nowIso() })
+        log(id, 'room', 'Sửa phòng', name)
+        return id
+      },
+
+      deleteRoom: (id) => {
+        const ahead = upcomingOn(get().bookings, id)
+        if (ahead.length) return `Phòng còn ${ahead.length} đặt phòng sắp tới. Chuyển hoặc huỷ trước khi xoá.`
+        log(id, 'room', 'Xoá phòng', room(id).name)
+        set((s) => ({ rooms: s.rooms.filter((r) => r.id !== id) }))
       },
 
       sync: (feedId) => {

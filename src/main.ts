@@ -1,6 +1,7 @@
 // Import React and ReactDOM
 import 'zmp-ui/zaui.css'
 import './css/app.scss'
+import './modules/pms/pms.scss'
 import './polyfills'
 import 'dayjs/locale/vi'
 import 'swiper/css'

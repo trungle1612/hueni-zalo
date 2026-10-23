@@ -1,0 +1,121 @@
+// Khai báo lưu trú, Giao ca, Buồng phòng: only what pms.scss doesn't already have.
+.pms {
+  button.link {
+    padding: 0;
+    border: 0;
+    background: none;
+    font: inherit;
+    font-weight: 600;
+    color: var(--primary);
+    cursor: pointer;
+  }
+  .deadline {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 16px;
+    background: var(--warn-bg);
+    border-bottom: 1px solid var(--warn-line);
+    color: var(--warn);
+    font-size: 14px;
+    font-weight: 500;
+
+    span {
+      flex: 1;
+    }
+    b {
+      font-size: 16px;
+      white-space: nowrap;
+    }
+  }
+  .t2.wrap {
+    white-space: normal;
+  }
+  .t3 {
+    display: block;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--danger);
+  }
+  .cb {
+    flex: none;
+    width: 20px;
+    height: 20px;
+    margin: 0;
+    accent-color: var(--primary);
+  }
+  .cam,
+  .photo {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    border: 1px dashed var(--border-strong);
+    border-radius: 6px;
+    background: var(--surface-subtle);
+    color: var(--text-2);
+    font-size: 14px;
+    text-align: center;
+  }
+  .cam {
+    height: 132px;
+    padding: 0 24px;
+
+    b {
+      color: var(--text);
+    }
+  }
+  .photo {
+    width: 100%;
+    min-height: 56px;
+    font-family: inherit;
+    cursor: pointer;
+  }
+  .kv.sub {
+    dt {
+      padding-left: 12px;
+      font-size: 14px;
+    }
+    dd {
+      font-size: 14px;
+      font-weight: 400;
+      color: var(--text-2);
+    }
+  }
+  .denoms {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .result {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 10px 12px;
+    border: 1px solid;
+    border-radius: 6px;
+    font-weight: 600;
+
+    &.ok {
+      background: var(--pos-bg);
+      border-color: var(--pos-line);
+      color: var(--pos);
+    }
+    &.short {
+      background: var(--danger-bg);
+      border-color: var(--danger-line);
+      color: var(--danger);
+    }
+    &.over {
+      background: var(--warn-bg);
+      border-color: var(--warn-line);
+      color: var(--warn);
+    }
+  }
+  .urgent {
+    color: var(--danger);
+    font-weight: 600;
+  }
+}

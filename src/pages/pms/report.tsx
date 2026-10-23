@@ -1,312 +1,426 @@
+import './sales.scss'
+
 import dayjs from 'dayjs'
 import React, { useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
-import { Button, Header, Icon, Page, Select } from 'zmp-ui'
 
-import { PageContainer } from '@/components'
-import { Card, Empty, Tag } from '@/modules/pms/components/ui'
-import { usePms } from '@/modules/pms/pms.store'
-import { PmsTabs } from '@/modules/pms/pms-tabs'
+import { A, AppBar, PlaceSub, Screen, Sec, Sheet, toast, useCurrent } from '@/modules/pms/components/ui'
 import {
-  buildReport,
-  Channel,
-  CHANNEL_LABEL,
-  monthStart,
-  previousReport,
-  reportDelta,
-  reportPeriod,
-} from '@/modules/pms/report'
-import { clsx } from '@/utils/clsx'
-import { formatMoney } from '@/utils/format'
+  addDays,
+  Booking,
+  bookingCode,
+  can,
+  daysBetween,
+  dueOf,
+  fmtDate,
+  guestLabel,
+  isStaying,
+  money,
+  occupiedUntil,
+  occupies,
+  today,
+  usePms,
+  weekday,
+} from '@/modules/pms/pms.store'
+import { buildReport, CHANNEL_LABEL, monthStart } from '@/modules/pms/report'
+import { groupCode, useSales } from '@/modules/pms/sales.store'
 
-const percent = (x?: number) => (x === undefined ? undefined : `${Math.round(x * 100)}%`)
-const oneDecimal = (x: number) => x.toFixed(1).replace(/\.0$/, '').replace('.', ',')
+const fmt = (d: dayjs.Dayjs) => d.format('YYYY-MM-DD')
+const million = (n: number) =>
+  (n / 1e6)
+    .toFixed(n >= 1e7 ? 1 : 2)
+    .replace(/\.?0+$/, '')
+    .replace('.', ',')
+const percent = (x?: number) => (x === undefined ? '—' : `${Math.round(x * 100)}%`)
 
-const CHANNEL_COLOR: Record<Channel, string> = {
-  manual: 'bg-primary',
-  airbnb: 'bg-rose-400',
-  booking: 'bg-sky-600',
-  other: 'bg-stone-400',
+function periods() {
+  const t = today()
+  const prev = dayjs(t).subtract(1, 'month')
+  return [
+    { tab: '7 ngày', start: addDays(t, -6), end: t, byDay: true },
+    { tab: 'Tháng này', start: monthStart(t), end: fmt(dayjs(t).endOf('month')), byDay: false },
+    {
+      tab: `Tháng ${prev.month() + 1}`,
+      start: fmt(prev.startOf('month')),
+      end: fmt(prev.endOf('month')),
+      byDay: false,
+    },
+  ]
 }
 
-function Delta({ value }: { value?: ReturnType<typeof reportDelta> }) {
-  if (!value) return null
-  return <Tag tone={value.good === undefined ? 'gray' : value.good ? 'green' : 'red'}>{value.text}</Tag>
+// "15 – 21/10/2026"
+const rangeLabel = (a: string, b: string) => {
+  const [da, db] = [dayjs(a), dayjs(b)]
+  return `${da.date()}${da.month() === db.month() ? '' : `/${da.month() + 1}`} – ${db.format('D/M/YYYY')}`
 }
 
-// Owner only (wiki §6i): estimated room revenue, occupancy, channels, arrivals for one month.
+// Owner only: room revenue estimate, occupancy, sources and the best rooms for a period.
 export default function ReportPage() {
-  const [params, setParams] = useSearchParams()
-  const { places, rooms, bookings, activities, currentSlug } = usePms()
-  const owned = places.filter((p) => p.role === 'owner')
-  const [slug, setSlug] = useState(
-    params.get('place') || owned.find((p) => p.slug === currentSlug)?.slug || owned[0]?.slug,
-  )
-  const place = owned.find((p) => p.slug === slug)
-  const month = monthStart(params.get('month') ? `${params.get('month')}-01` : dayjs().format('YYYY-MM-DD'))
-  const setMonth = (m: dayjs.Dayjs) =>
-    setParams({ month: m.format('YYYY-MM'), ...(slug ? { place: slug } : {}) }, { replace: true })
+  const { bookings, activities } = usePms()
+  const { place, rooms } = useCurrent()
+  const { commission, groups } = useSales()
+  const [period, setPeriod] = useState(0)
+  const [sel, setSel] = useState<number>()
+  const [exporting, setExporting] = useState(false)
 
-  if (!place) {
+  if (!can(place, 'manage')) {
     return (
-      <>
-        <Page>
-          <Header title="Báo cáo" showBackIcon={false} />
-          <PageContainer withHeader withBottomNav>
-            <Empty action={{ label: 'Về Hôm nay', to: '/' }}>Chỉ chủ homestay xem được báo cáo.</Empty>
-          </PageContainer>
-        </Page>
-        <PmsTabs active="/report" />
-      </>
+      <Screen tab="/report">
+        <AppBar title="Báo cáo" sub={<PlaceSub />} />
+        <main className="scroll">
+          <div className="sec">
+            <div className="panel msg">
+              <h2>Bạn chưa có quyền xem báo cáo</h2>
+              <p>
+                Tài khoản <b style={{ color: 'var(--text)' }}>Lễ tân</b> xem và xử lý được đặt phòng, phòng và thanh
+                toán, nhưng không xem doanh thu.
+              </p>
+              <p>Chủ cơ sở có thể cấp quyền trên trang quản trị hueni, mục Nhân viên.</p>
+              <div style={{ marginTop: 4 }}>
+                <A className="btn" to="/" replace>
+                  Về Hôm nay
+                </A>
+              </div>
+            </div>
+          </div>
+        </main>
+      </Screen>
     )
   }
 
-  const input = { place, rooms, bookings, activities }
-  const r = buildReport(input, month)
-  const prev = r.future ? undefined : previousReport(input, r)
-  const compared = prev && `so với ${reportPeriod(prev)}`
-  const m = dayjs(r.month)
+  const p = periods()[period]
+  const r = buildReport({ place, rooms, bookings, activities }, p.start, p.end)
+  const range = rangeLabel(r.month, r.last)
+  const ids = new Set(rooms.map((x) => x.id))
+  const due = bookings
+    .filter((b) => ids.has(b.room_id) && occupies(b, r.month, addDays(r.last, 1)))
+    .reduce(
+      (n, b) =>
+        n +
+        dueOf(
+          b,
+          rooms.find((x) => x.id === b.room_id),
+        ),
+      0,
+    )
 
-  const stats = [
-    {
-      label: 'Phòng có khách',
-      value: percent(r.occupancy),
-      sub: `${r.sold} trong ${r.available} đêm`,
-      delta: prev && reportDelta(r.occupancy, prev.occupancy, 'points'),
-    },
-    {
-      label: 'Giá trung bình mỗi đêm',
-      value: r.adr !== undefined ? formatMoney(Math.round(r.adr)) : undefined,
-      delta: prev && reportDelta(r.adr, prev.adr, 'percent'),
-    },
-    {
-      label: 'Khách ở trung bình',
-      value: r.alos !== undefined ? `${oneDecimal(r.alos)} đêm` : undefined,
-      delta: prev && reportDelta(r.alos, prev.alos, 'nights'),
-    },
-    {
-      label: 'Khách huỷ',
-      value: percent(r.cancellationRate),
-      sub: `${r.outcomes.cancelled + r.otaCancelled} trong ${r.bookingCount + r.otaCancelled} lượt`,
-      delta: prev && reportDelta(r.cancellationRate, prev.cancellationRate, 'points', false),
-    },
-  ].filter((s) => s.value)
+  // Bars: one per day for 7 days, else weeks starting on the 1st, 8th, 15th, 22nd (the last runs to the end).
+  const bars: { label: string; value: number }[] = []
+  if (p.byDay) {
+    for (let d = r.month; d <= r.last; d = addDays(d, 1)) bars.push({ label: weekday(d), value: r.nightly[d] || 0 })
+  } else {
+    ;[1, 8, 15, 22].forEach((from, i, all) => {
+      const a = fmt(dayjs(r.month).date(from))
+      if (a > r.last) return
+      const b = i === all.length - 1 ? r.last : [fmt(dayjs(r.month).date(from + 6)), r.last].sort()[0]
+      let value = 0
+      for (let d = a; d <= b; d = addDays(d, 1)) value += r.nightly[d] || 0
+      bars.push({ label: `${from}–${dayjs(b).date()}`, value })
+    })
+  }
+  const max = Math.max(...bars.map((b) => b.value))
+  const maxM = max / 1e6
+  const step = maxM <= 5 ? 1 : maxM <= 20 ? 5 : 10
+  const scale = Math.max(step, Math.ceil(maxM / step) * step)
+  const maxIdx = bars.findIndex((b) => b.value === max)
+  const flat = bars.every((b) => b.value === bars[0].value)
+  const on = sel ?? (flat ? -1 : maxIdx)
+  const chartTitle = !max
+    ? 'Chưa có doanh thu trong kỳ này'
+    : flat
+      ? 'Doanh thu đều trong kỳ'
+      : `${bars[maxIdx].label} cao nhất ${p.byDay ? 'tuần' : 'tháng'}`
 
-  const outcomes = (
-    [
-      ['Đã xác nhận', r.outcomes.confirmed],
-      ['Giữ chỗ', r.outcomes.hold],
-      ['Đã huỷ (gồm không đến)', r.outcomes.cancelled],
-      ['Airbnb / Booking.com đã huỷ', r.otaCancelled],
-    ] as const
-  ).filter(([, n]) => n > 0)
+  const channels = r.channels
+    .filter((c) => c.revenue)
+    .sort((a, b) => b.revenue - a.revenue)
+    .map((c) => ({ ...c, pct: commission[c.key], net: Math.round((c.revenue * (100 - commission[c.key])) / 100) }))
 
-  const ahead = r.ahead > 0 && (
-    <p className="text-base m-0 pt-3 border-0 border-t border-solid border-border">
-      Đã đặt trước <b>{r.ahead} đêm</b> từ {dayjs(r.last).add(1, 'day').format('D/M')} đến cuối tháng
-      {r.aheadRevenue > 0 && ` · khoảng ${formatMoney(r.aheadRevenue)}`}
-    </p>
-  )
+  // Công nợ chưa thu: every open balance of the place, not only this period. A group billed as one is one line.
+  const receivables = receivablesOf(
+    bookings.filter((b) => ids.has(b.room_id)),
+    (b) =>
+      dueOf(
+        b,
+        rooms.find((x) => x.id === b.room_id),
+      ),
+  ).map((x) => {
+    const g = x.b.group_id
+      ? groups.find((y) => y.id === x.b.group_id && y.bill === 'one' && !y.own.includes(x.b.id))
+      : undefined
+    return { ...x, g }
+  })
+  const lines = Object.values(
+    receivables.reduce<Record<string, (typeof receivables)[number][]>>((acc, x) => {
+      const k = x.g ? `g${x.g.id}` : `b${x.b.id}`
+      ;(acc[k] = acc[k] || []).push(x)
+      return acc
+    }, {}),
+  ).map((items) => ({ ...items[0], due: items.reduce((n, x) => n + x.due, 0), count: items.length }))
+  const owed = lines.reduce((n, x) => n + x.due, 0)
+  const top = r.rooms
+    .filter((x) => x.sold)
+    .sort((a, b) => (b.revenue || 0) - (a.revenue || 0) || b.sold - a.sold)
+    .slice(0, 5)
+
+  function download() {
+    const lines = [
+      ['Báo cáo', place.name, range],
+      ['Doanh thu (đ)', r.revenue],
+      ['Phòng có khách', `${percent(r.occupancy)} (${r.sold}/${r.available} đêm)`],
+      ['Giá trung bình 1 đêm (đ)', r.adr ? Math.round(r.adr) : ''],
+      ['Còn phải thu (đ)', due],
+      [],
+      ['Ngày', 'Doanh thu (đ)'],
+      ...Object.keys(r.nightly)
+        .sort()
+        .map((d) => [d, r.nightly[d]]),
+      [],
+      ['Nguồn', 'Số đêm', 'Doanh thu (đ)', 'Hoa hồng (%)', 'Thực nhận (đ)'],
+      ...r.channels.map((c) => [
+        CHANNEL_LABEL[c.key],
+        c.nights,
+        c.revenue,
+        commission[c.key],
+        Math.round((c.revenue * (100 - commission[c.key])) / 100),
+      ]),
+      [],
+      ['Phòng', 'Số đêm', 'Doanh thu (đ)'],
+      ...r.rooms.map((x) => [x.room.name, x.sold, x.revenue ?? '']),
+    ]
+    const csv = '﻿' + lines.map((l) => l.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n')
+    const name = `bao-cao-${r.month}-${r.last}.csv`
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }))
+    a.download = name
+    a.click()
+    URL.revokeObjectURL(a.href)
+    setExporting(false)
+    toast(`Đã tạo ${name}, xem trong mục Tải về`)
+  }
 
   return (
-    <>
-      <Page restoreScroll>
-        <Header title="Báo cáo" showBackIcon={false} />
-        <PageContainer withHeader withBottomNav>
-          <div className="p-4 space-y-4 pb-8">
-            {owned.length > 1 && (
-              <Select
-                label="Homestay"
-                value={slug}
-                onChange={(v) => {
-                  setSlug(String(v))
-                  setParams({ month: m.format('YYYY-MM'), place: String(v) }, { replace: true })
-                }}
-                closeOnSelect
-              >
-                {owned.map((p) => (
-                  <Select.Option key={p.slug} value={p.slug} title={p.name} />
-                ))}
-              </Select>
-            )}
+    <Screen tab="/report">
+      <AppBar title="Báo cáo" sub={<PlaceSub prefix={range} />}>
+        <button type="button" className="btn btn-sm" onClick={() => setExporting(true)}>
+          Xuất CSV
+        </button>
+      </AppBar>
+      <div className="seg" role="group" aria-label="Kỳ báo cáo">
+        {periods().map((x, i) => (
+          <button
+            key={x.tab}
+            type="button"
+            aria-pressed={i === period}
+            onClick={() => (setPeriod(i), setSel(undefined))}
+          >
+            {x.tab}
+          </button>
+        ))}
+      </div>
 
-            <Card className="p-2 flex items-center justify-between gap-1">
-              <Button
-                size="medium"
-                variant="tertiary"
-                prefixIcon={<Icon icon="zi-chevron-left" />}
-                onClick={() => setMonth(m.subtract(1, 'month'))}
-              >
-                Tháng {m.subtract(1, 'month').month() + 1}
-              </Button>
-              <div className="text-center min-w-0">
-                <h2 className="text-lg font-semibold m-0">Tháng {m.format('MM/YYYY')}</h2>
-                {r.current ? (
-                  <div className="text-sm text-text-secondary">đến hôm nay, {dayjs(r.last).format('D/M')}</div>
-                ) : (
-                  <button
-                    className="text-base font-semibold text-primary-pressed bg-transparent border-0 p-0 min-h-[32px] underline underline-offset-4"
-                    onClick={() => setMonth(dayjs())}
-                  >
-                    Về tháng này
-                  </button>
-                )}
+      <main className="scroll">
+        <div className="sec">
+          <div className="panel kpis">
+            <div className="kpi">
+              <span>Doanh thu</span>
+              <b>{money(r.revenue)}</b>
+            </div>
+            <div className="kpi">
+              <span>Phòng có khách</span>
+              <b>{percent(r.occupancy)}</b>
+              <small>
+                {r.sold}/{r.available} đêm
+              </small>
+            </div>
+            <div className="kpi">
+              <span>Giá trung bình 1 đêm</span>
+              <b>{r.adr ? money(Math.round(r.adr / 1000) * 1000) : '—'}</b>
+            </div>
+            <div className="kpi">
+              <span>Còn phải thu</span>
+              <b style={due ? { color: 'var(--warn)' } : undefined}>{money(due)}</b>
+            </div>
+          </div>
+        </div>
+
+        <Sec title={chartTitle} aside={<span className="aside">triệu đồng</span>}>
+          <div className="panel chart">
+            <div
+              className="plot"
+              role="group"
+              aria-label={`${chartTitle}. ${bars.map((b) => `${b.label}: ${million(b.value)} triệu`).join('; ')}`}
+            >
+              <div className="gl" style={{ top: 16 }}>
+                <span>{scale}</span>
               </div>
-              <Button
-                size="medium"
-                variant="tertiary"
-                suffixIcon={<Icon icon="zi-chevron-right" />}
-                onClick={() => setMonth(m.add(1, 'month'))}
-              >
-                Tháng {m.add(1, 'month').month() + 1}
-              </Button>
-            </Card>
+              <div className="gl" style={{ top: 72 }}>
+                <span>{String(scale / 2).replace('.', ',')}</span>
+              </div>
+              <div className="gl" style={{ top: '100%', borderTop: 0 }}>
+                <span>0</span>
+              </div>
+              <div className="bars">
+                {bars.map((b, i) => (
+                  <button
+                    key={b.label}
+                    type="button"
+                    className="bcol"
+                    aria-label={`${b.label}: ${million(b.value)} triệu`}
+                    aria-pressed={i === on}
+                    onClick={() => setSel(i)}
+                  >
+                    <span className="v">{million(b.value)}</span>
+                    <span className="b" style={{ height: Math.round((b.value / 1e6 / scale) * 112) }} />
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="xl" aria-hidden="true">
+              {bars.map((b, i) => (
+                <span key={b.label} className={i === on ? 'on' : undefined}>
+                  {b.label}
+                </span>
+              ))}
+            </div>
+          </div>
+        </Sec>
 
-            {r.empty ? (
-              <Card className="p-4 space-y-3">
-                <p className="text-lg font-semibold m-0">
-                  {r.future
-                    ? `Chưa có ai đặt phòng cho tháng ${m.month() + 1}.`
-                    : r.current
-                      ? `Chưa có đêm nào có khách từ 1/${m.month() + 1} đến hôm nay.`
-                      : `Tháng ${m.month() + 1} không có đêm nào có khách và không có lượt đặt nào.`}
-                </p>
-                {ahead}
-              </Card>
+        <Sec title="Theo nguồn đặt">
+          <div className="panel">
+            {channels.length ? (
+              <table>
+                <thead>
+                  <tr>
+                    <th scope="col">Nguồn</th>
+                    <th scope="col" className="n">
+                      Doanh thu
+                    </th>
+                    <th scope="col" className="n">
+                      Thực nhận
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {channels.map((c) => (
+                    <tr key={c.key}>
+                      <td>
+                        {CHANNEL_LABEL[c.key]}
+                        <small className="sub">
+                          {c.nights} đêm · {c.pct ? `hoa hồng ${c.pct}%` : 'không hoa hồng'}
+                        </small>
+                      </td>
+                      <td className="n">{money(c.revenue)}</td>
+                      <td className="n" style={{ fontWeight: 600 }}>
+                        {money(c.net)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             ) : (
-              <>
-                <Card className="p-4 space-y-2">
-                  <h2 className="text-base font-medium text-text-secondary m-0">
-                    {r.future ? `Đã đặt trước cho tháng ${m.month() + 1}` : `Tiền phòng ${reportPeriod(r)} (ước tính)`}
-                  </h2>
-                  <p className="text-4xl font-bold m-0">{formatMoney(r.revenue)}</p>
-                  <p className="text-base m-0 flex flex-wrap items-center gap-2">
-                    {r.future ? `${r.sold} đêm đã có khách đặt.` : `Từ ${r.sold} đêm có khách.`}
-                    {prev && reportDelta(r.revenue, prev.revenue, 'percent') && (
-                      <span className="inline-flex items-center gap-2">
-                        <Delta value={reportDelta(r.revenue, prev.revenue, 'percent')} /> {compared}
-                      </span>
-                    )}
-                  </p>
-                  <p className="text-base text-text-secondary m-0">
-                    Số đêm × giá phòng hiện tại, chưa trừ hoa hồng Airbnb / Booking.com.
-                    {r.unpricedRooms && ' Phòng chưa có giá không được tính.'}
-                  </p>
-                  {!r.future && ahead}
-                </Card>
-
-                {stats.length > 0 && (
-                  <Card className="p-4 space-y-3">
-                    <dl className="grid grid-cols-2 gap-x-3 gap-y-5 m-0">
-                      {stats.map((s) => (
-                        <div key={s.label} className="space-y-1">
-                          <dt className="text-base text-text-secondary">{s.label}</dt>
-                          <dd className="text-2xl font-bold m-0">{s.value}</dd>
-                          {(s.sub || s.delta) && (
-                            <dd className="m-0 flex flex-wrap items-center gap-1 text-sm">
-                              {s.sub}
-                              <Delta value={s.delta} />
-                            </dd>
-                          )}
-                        </div>
-                      ))}
-                    </dl>
-                    {stats.some((s) => s.delta) && (
-                      <p className="text-sm text-text-secondary m-0">Tăng / giảm {compared}.</p>
-                    )}
-                  </Card>
-                )}
-
-                <Card className="p-4 space-y-3">
-                  <h2 className="text-lg font-semibold m-0">Theo phòng</h2>
-                  <ul className="list-none p-0 m-0 space-y-4">
-                    {r.rooms.map((row) => (
-                      <li key={row.room.id} className="space-y-1">
-                        <div className="flex justify-between gap-3 text-base">
-                          <span className="font-semibold">Phòng {row.room.name}</span>
-                          <span className={row.revenue === undefined ? 'text-amber-900' : 'font-medium'}>
-                            {row.revenue === undefined ? 'Chưa có giá' : formatMoney(row.revenue)}
-                          </span>
-                        </div>
-                        <div
-                          className="h-2 rounded-full bg-ng-10 overflow-hidden"
-                          role="img"
-                          aria-label={`${row.sold} trên ${r.days} đêm có khách`}
-                        >
-                          <div
-                            className="h-full bg-primary rounded-full"
-                            style={{ width: `${(row.sold / r.days) * 100}%` }}
-                          />
-                        </div>
-                        <div className="text-sm text-text-secondary">
-                          {row.sold} / {r.days} đêm có khách
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                  <div className="flex justify-between text-base font-semibold pt-3 border-0 border-t border-solid border-border">
-                    <span>
-                      Tổng · {r.sold} / {r.available} đêm
-                    </span>
-                    <span>{formatMoney(r.revenue)}</span>
-                  </div>
-                  {r.held > 0 && (
-                    <p className="text-sm text-text-secondary m-0">
-                      Thêm {r.held} đêm giữ chỗ chưa xác nhận, không tính ở trên.
-                    </p>
-                  )}
-                </Card>
-
-                {r.channels.some((c) => c.nights > 0) && (
-                  <Card className="p-4 space-y-3">
-                    <h2 className="text-lg font-semibold m-0">Khách từ đâu</h2>
-                    <div className="flex h-3 rounded-full overflow-hidden gap-0.5" aria-hidden>
-                      {r.channels
-                        .filter((c) => c.nights > 0)
-                        .map((c) => (
-                          <div
-                            key={c.key}
-                            className={CHANNEL_COLOR[c.key]}
-                            style={{ width: `${(c.nights / r.sold) * 100}%` }}
-                          />
-                        ))}
-                    </div>
-                    <ul className="list-none p-0 m-0 divide-y divide-border">
-                      {r.channels.map((c) => (
-                        <li key={c.key} className="flex items-center justify-between gap-3 py-2 text-base">
-                          <span className="flex items-center gap-2">
-                            <span className={clsx('w-3 h-3 rounded-full shrink-0', CHANNEL_COLOR[c.key])} aria-hidden />
-                            {CHANNEL_LABEL[c.key]}
-                          </span>
-                          <span className="text-right">
-                            {c.nights} đêm · {percent(r.sold ? c.nights / r.sold : 0)}
-                            <span className="block text-sm text-text-secondary">{formatMoney(c.revenue)}</span>
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  </Card>
-                )}
-
-                {outcomes.length > 0 && (
-                  <Card className="p-4 space-y-1">
-                    <h2 className="text-lg font-semibold m-0">Lượt khách đến {reportPeriod(r)}</h2>
-                    <ul className="list-none p-0 m-0 divide-y divide-border">
-                      {outcomes.map(([label, n]) => (
-                        <li key={label} className="flex justify-between py-2 text-base">
-                          <span>{label}</span>
-                          <span className="font-semibold">{n}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </Card>
-                )}
-              </>
+              <div className="empty-row">Chưa có đêm nào bán được trong kỳ này.</div>
             )}
           </div>
-        </PageContainer>
-      </Page>
-      <PmsTabs active="/report" />
-    </>
+        </Sec>
+
+        {lines.length > 0 && (
+          <Sec title="Công nợ chưa thu" aside={<span className="aside">{money(owed)}</span>}>
+            <div className="panel">
+              {lines.map((x) => (
+                <A
+                  key={x.g ? `g${x.g.id}` : x.b.id}
+                  className="row"
+                  to={x.g ? `/groups/${x.g.id}` : `/bookings/${x.b.id}`}
+                >
+                  <span className="grow">
+                    <span className="t1">
+                      {x.g ? `${x.g.name} · ${groupCode(x.g)}` : `${guestLabel(x.b)} · ${bookingCode(x.b)}`}
+                    </span>
+                    <span className="t2" style={x.late ? { color: 'var(--danger)', fontWeight: 600 } : undefined}>
+                      {x.g ? `${x.count} phòng · ` : ''}
+                      {x.when}
+                    </span>
+                  </span>
+                  <b style={x.late ? { color: 'var(--danger)' } : undefined}>{money(x.due)}</b>
+                </A>
+              ))}
+            </div>
+          </Sec>
+        )}
+
+        {top.length > 0 && (
+          <Sec title={`${top.length} phòng doanh thu cao nhất`}>
+            <div className="panel">
+              <table>
+                <thead>
+                  <tr>
+                    <th scope="col">Phòng</th>
+                    <th scope="col" className="n">
+                      Số đêm
+                    </th>
+                    <th scope="col" className="n">
+                      Doanh thu
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {top.map((x) => (
+                    <tr key={x.room.id}>
+                      <td style={{ fontWeight: 600 }}>{x.room.name}</td>
+                      <td className="n">{x.sold}</td>
+                      <td className="n">{x.revenue ? money(x.revenue) : '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Sec>
+        )}
+
+        <p className="foot">
+          Chạm vào cột để xem số liệu. Doanh thu ước tính theo đêm khách đã ở × giá mỗi đêm, gồm cả khoản còn phải thu.
+          Thực nhận = doanh thu trừ hoa hồng kênh (cài ở Kênh bán phòng). Công suất = số đêm có khách ÷ (
+          {r.rooms.length} phòng × {r.days} ngày).
+          {r.unpricedRooms && ' Phòng chưa có giá không tính vào doanh thu.'}
+        </p>
+      </main>
+
+      {exporting && (
+        <Sheet title={`Xuất báo cáo ${range}`} onClose={() => setExporting(false)}>
+          <p className="help">
+            CSV, mở được bằng Excel. Gồm chỉ số, doanh thu theo ngày, theo nguồn và theo từng phòng.
+          </p>
+          <button type="button" className="btn btn-primary btn-block" onClick={download}>
+            Tải file CSV
+          </button>
+          <button type="button" className="btn btn-ghost btn-block" onClick={() => setExporting(false)}>
+            Đóng
+          </button>
+        </Sheet>
+      )}
+    </Screen>
   )
+}
+
+// Open balances, overdue first: once the guest has left (or should have), the money is late.
+function receivablesOf(all: Booking[], dueFor: (b: Booking) => number) {
+  const t = today()
+  return all
+    .filter((b) => b.status !== 'cancelled')
+    .map((b) => {
+      const out = b.checked_out_at ? occupiedUntil(b) : b.end_date
+      const left = !!b.checked_out_at || (!isStaying(b) && b.end_date < t)
+      const late = left && daysBetween(out, t) > 0
+      const on = (d: string) => (d === t ? 'hôm nay' : fmtDate(d))
+      const when = late
+        ? `Quá hạn ${daysBetween(out, t)} ngày · trả ${fmtDate(out)}`
+        : left
+          ? 'Chưa thu · đã trả phòng hôm nay'
+          : isStaying(b)
+            ? `Thu khi trả phòng ${on(b.end_date)}`
+            : `Thu khi nhận phòng ${on(b.start_date)}`
+      return { b, due: dueFor(b), late, when }
+    })
+    .filter((x) => x.due > 0)
+    .sort((a, b) => Number(b.late) - Number(a.late) || a.b.start_date.localeCompare(b.b.start_date))
 }
