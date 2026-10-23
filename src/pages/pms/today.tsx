@@ -3,6 +3,7 @@ import React, { useState } from 'react'
 
 import { needsSheet, StayKind, StaySheet, useStay } from '@/modules/pms/components/stay-sheet'
 import { A, AppBar, Badge, Icon, PlaceSub, Screen, Sec, todayLine, useCurrent } from '@/modules/pms/components/ui'
+import { undeclaredGuests } from '@/modules/pms/ops.store'
 import {
   arrivalDate,
   Booking,
@@ -65,7 +66,7 @@ export default function TodayPage() {
 
   // Every open problem, not just the first: the OTA feed is pinned above, the rest listed here.
   const failing = failingFeeds(feeds, allRooms, place.id)
-  const undeclared = mine.filter((b) => isStaying(b) && !b.declared_at)
+  const undeclared = undeclaredGuests(mine)
   const tasks: { key: string; text: string; to: string }[] = tomorrow
     ? []
     : [
@@ -81,12 +82,12 @@ export default function TodayPage() {
             text: `Phòng ${roomOf(b.room_id)?.name} chưa dọn, ${guestLabel(b)} đến hôm nay.`,
             to: '/rooms?f=clean',
           })),
-        ...(undeclared.length
+        ...(undeclared
           ? [
               {
                 key: 'decl',
-                text: `${undeclared.length} khách đang ở chưa khai báo lưu trú.`,
-                to: `/bookings/${undeclared[0].id}`,
+                text: `${undeclared} khách chưa gửi khai báo lưu trú. Hạn 23:00 tối nay.`,
+                to: '/registration',
               },
             ]
           : []),
@@ -169,7 +170,7 @@ export default function TodayPage() {
         </button>
       </div>
       {failing > 0 && !tomorrow && (
-        <A className="band" to="/feeds" role="alert">
+        <A className="band" to="/channels" role="alert">
           <span>Lịch OTA lỗi ở {failing} kênh: phòng trống trên hueni.me có thể sai.</span>
           <b>Sửa</b>
         </A>

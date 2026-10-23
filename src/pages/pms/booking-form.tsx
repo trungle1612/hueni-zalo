@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { useParams, useSearchParams } from 'react-router-dom'
+import { useLocation, useParams, useSearchParams } from 'react-router-dom'
 import { useNavigate } from 'zmp-ui'
 
 import {
@@ -98,6 +98,8 @@ function Form({
   start?: string
 }) {
   const navigate = useNavigate()
+  // From Hồ sơ khách: name and phone come as router state, never in the URL.
+  const from = (useLocation().state || {}) as { guest_name?: string; guest_phone?: string }
   const { places, rooms, bookings, actions } = usePms()
   const owner = can(
     places.find((p) => p.id === placeId),
@@ -109,8 +111,8 @@ function Form({
 
   const start0 = editing?.start_date || start || today()
   const orig = {
-    guest_phone: editing?.guest_phone || '',
-    guest_name: editing?.guest_name || '',
+    guest_phone: editing?.guest_phone || from.guest_phone || '',
+    guest_name: editing?.guest_name || from.guest_name || '',
     guests: editing?.guests,
     origin: editing?.origin || 'Trực tiếp',
     start_date: start0,

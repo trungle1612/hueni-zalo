@@ -1,0 +1,84 @@
+// Loại phòng và giá, Nhân viên và nhật ký: the few pieces pms.scss doesn't have.
+.pms {
+  .price {
+    flex: none;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    text-align: right;
+
+    b {
+      font-weight: 600;
+    }
+    span {
+      font-size: 13px;
+      color: var(--text-2);
+    }
+  }
+  .preview {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding-top: 4px;
+
+    b {
+      font-size: 20px;
+      font-weight: 700;
+    }
+  }
+  .notice.info {
+    border-color: var(--info-line);
+    background: var(--info-bg);
+    color: var(--info);
+  }
+  .approve {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 12px;
+    border: 1px solid var(--warn-line);
+    background: var(--warn-bg);
+    border-radius: 8px;
+
+    b {
+      color: var(--warn);
+    }
+    .actions {
+      padding: 4px 0 0;
+      border: 0;
+      justify-content: flex-end;
+    }
+  }
+  .av {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    border-radius: 18px;
+    background: var(--muted-bg);
+    color: var(--text-2);
+    font-weight: 600;
+  }
+  .chg {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    font-size: 14px;
+
+    s {
+      color: var(--text-2);
+    }
+  }
+  .t2.wrap {
+    white-space: normal;
+  }
+  .perm {
+    padding: 8px 12px;
+    border-top: 1px solid var(--border);
+
+    &:first-child {
+      border-top: 0;
+    }
+  }
+}

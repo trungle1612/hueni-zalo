@@ -181,7 +181,7 @@
   .nav {
     flex: none;
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     background: var(--surface);
     border-top: 1px solid var(--border);
     padding-bottom: max(var(--zaui-safe-area-inset-bottom, 0px), 20px);
@@ -282,6 +282,16 @@
     &:first-child {
       border-top: 0;
     }
+  }
+  button.row {
+    width: 100%;
+    border-right: 0;
+    border-bottom: 0;
+    border-left: 0;
+    background: none;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
   }
   .row-main {
     flex: 1;

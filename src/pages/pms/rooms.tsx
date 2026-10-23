@@ -217,7 +217,7 @@ export default function RoomsPage() {
           </div>
         )}
         <div className="sec">
-          <A className="panel ota-link" to="/feeds">
+          <A className="panel ota-link" to="/channels">
             <span>
               <span className="t1">Kênh OTA</span>
               <span className="t2" style={failing ? { color: 'var(--danger)' } : undefined}>

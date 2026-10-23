@@ -25,11 +25,22 @@ export type Room = {
   updated_at?: string
 }
 
-export type Provider = 'airbnb' | 'booking' | 'other'
+export type Provider = 'airbnb' | 'booking' | 'agoda' | 'other'
 
 export type PayMethod = 'cash' | 'bank' | 'card'
 // amount < 0 = a refund
-export type Payment = { amount: number; method: PayMethod; at: string; deposit?: boolean }
+export type Payment = { amount: number; method: PayMethod; at: string; deposit?: boolean; by?: string }
+// A service added to the bill (Phiếu tính tiền): unit price × qty.
+export type Charge = { id: number; name: string; unit: string; price: number; qty: number; at: string }
+// One guest's papers for lưu trú: only what the declaration needs, never the photo.
+export type GuestDoc = {
+  name: string
+  kind: 'vn' | 'foreign'
+  id_tail: string // last 4 digits: the full number is never shown in lists
+  status: 'ready' | 'sent' | 'ok' | 'error'
+  problem?: string
+  at?: string
+}
 
 export type Booking = {
   id: number
@@ -47,6 +58,10 @@ export type Booking = {
   price?: number // per night, fixed when the room's price changes later; else the room's price
   weekend_price?: number // Friday/Saturday nights, fixed together with `price`
   payments?: Payment[]
+  charges?: Charge[]
+  discount?: { amount: number; reason: string }
+  group_id?: number // Đặt phòng theo đoàn: one booking per room, one contact
+  docs?: GuestDoc[]
   checked_in_at?: string
   checked_out_at?: string
   declared_at?: string
@@ -103,7 +118,12 @@ const hoursAgo = (h: number) => dayjs().subtract(h, 'hour').toISOString()
 
 // ---------- booking rules (copies of hueni-api Booking) ----------
 
-export const PROVIDER_NAME: Record<Provider, string> = { airbnb: 'Airbnb', booking: 'Booking.com', other: 'iCal' }
+export const PROVIDER_NAME: Record<Provider, string> = {
+  airbnb: 'Airbnb',
+  booking: 'Booking.com',
+  agoda: 'Agoda',
+  other: 'iCal',
+}
 export const sourceLabel = (b: Booking) => (b.source === 'manual' ? 'Trực tiếp' : PROVIDER_NAME[b.provider || 'other'])
 export const guestLabel = (b: Booking) => b.guest_name || b.note || (b.source === 'ical' ? sourceLabel(b) : 'Khách')
 export const isStaying = (b: Booking) => !!b.checked_in_at && !b.checked_out_at
@@ -116,7 +136,7 @@ export const isOpen = (r: Room) => r.active && !inMaintenance(r)
 export const needsCleaning = (r: Room) => isOpen(r) && r.housekeeping === 'dirty'
 
 // Money: OTA bookings are paid on the OTA; manual ones by the payments recorded here.
-// ponytail: total = nights × one price; extras, discounts and taxes come with the API.
+// ponytail: total = nights + services − discount; taxes come with the API.
 export const nightPrice = (b: Booking, room?: Room) => b.price ?? room?.price ?? 0
 const isWeekendNight = (date: string) => [5, 6].includes(dayjs(date).day()) // Fri, Sat
 // The price of one night: Friday and Saturday use the weekend price when there is one.
@@ -126,7 +146,10 @@ export const priceOn = (b: Booking, room: Room | undefined, date: string) => {
 }
 const nightDates = (b: Pick<Booking, 'start_date' | 'end_date'>) =>
   Array.from({ length: Math.max(0, nights(b)) }, (_, i) => fmt(dayjs(b.start_date).add(i, 'day')))
-export const totalOf = (b: Booking, room?: Room) => nightDates(b).reduce((n, d) => n + priceOn(b, room, d), 0)
+export const roomTotalOf = (b: Booking, room?: Room) => nightDates(b).reduce((n, d) => n + priceOn(b, room, d), 0)
+export const chargesOf = (b: Booking) => (b.charges || []).reduce((n, c) => n + c.price * c.qty, 0)
+export const totalOf = (b: Booking, room?: Room) =>
+  roomTotalOf(b, room) + (b.source === 'ical' ? 0 : chargesOf(b) - (b.discount?.amount || 0))
 export const hasWeekendPrice = (b: Booking, room?: Room) =>
   nightDates(b).some((d) => priceOn(b, room, d) !== nightPrice(b, room))
 export const paidOf = (b: Booking, room?: Room) =>
@@ -640,6 +663,7 @@ type State = {
   currentSlug: string
   actions: {
     signIn: () => void
+    signOut: () => void
     setPlace: (slug: string) => void
     opened: (id: number) => void
     snapshot: () => Snapshot
@@ -720,6 +744,14 @@ export const usePms = create<State>((set, get) => {
           // private mode: signed in for this session only
         }
         set({ signedIn: true })
+      },
+      signOut: () => {
+        try {
+          localStorage.removeItem(SIGNED_IN)
+        } catch {
+          // nothing stored
+        }
+        set({ signedIn: false })
       },
       setPlace: (slug) => set({ currentSlug: slug }),
       opened: (id) => set((s) => ({ recent: [id, ...s.recent.filter((x) => x !== id)].slice(0, 5) })),

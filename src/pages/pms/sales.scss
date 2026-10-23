@@ -1,0 +1,83 @@
+// Group booking, sales channels and the direct booking page.
+.pms {
+  .list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  // One choice among cards: a room to add, a way to settle a conflict.
+  .pick {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    min-height: 52px;
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface);
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+
+    &[aria-pressed='true'] {
+      border-color: var(--primary);
+      background: var(--primary-subtle);
+      box-shadow: inset 3px 0 0 var(--primary);
+    }
+  }
+  .logo {
+    flex: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border-radius: 6px;
+    background: var(--muted-bg);
+    color: var(--text-2);
+    font-size: 12px;
+    font-weight: 700;
+  }
+  .notice.err {
+    border-color: var(--danger-line);
+    background: var(--danger-bg);
+    color: var(--danger);
+  }
+  td .sub {
+    display: block;
+    color: var(--text-2);
+    font-size: 13px;
+    font-weight: 400;
+  }
+  .pv {
+    border: 1px solid var(--border-strong);
+    border-radius: 8px;
+    overflow: hidden;
+    background: var(--surface);
+  }
+  .pv-h {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+    font-weight: 600;
+  }
+  .pv-r {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border-top: 1px solid var(--border);
+
+    &:first-of-type {
+      border-top: 0;
+    }
+  }
+  .pv-f {
+    padding: 10px 12px;
+    border-top: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text-2);
+    font-size: 14px;
+  }
+}

@@ -34,6 +34,13 @@ const ICON = {
     </>
   ),
   report: <path d="M4 20V10M10 20V4M16 20v-7M22 20H2" />,
+  more: (
+    <>
+      <circle cx="5" cy="12" r="1.5" />
+      <circle cx="12" cy="12" r="1.5" />
+      <circle cx="19" cy="12" r="1.5" />
+    </>
+  ),
 }
 
 export function Icon({ name, size = 20, stroke = 2 }: { name: keyof typeof ICON; size?: number; stroke?: number }) {
@@ -101,15 +108,16 @@ export function useBack(fallback = '/') {
   return () => (window.history.length > 1 ? navigate(-1) : navigate(fallback, { replace: true }))
 }
 
-export type TabKey = '/' | '/calendar' | '/rooms' | '/report'
+export type TabKey = '/' | '/calendar' | '/rooms' | '/report' | '/more'
 const TABS: { to: TabKey; label: string; icon: keyof typeof ICON }[] = [
   { to: '/', label: 'Hôm nay', icon: 'today' },
   { to: '/calendar', label: 'Lịch', icon: 'calendar' },
   { to: '/rooms', label: 'Phòng', icon: 'rooms' },
   { to: '/report', label: 'Báo cáo', icon: 'report' },
+  { to: '/more', label: 'Thêm', icon: 'more' },
 ]
 
-// Always four items: staff without the report still see Báo cáo and get the permission screen.
+// Always five items: staff without the report still see Báo cáo and get the permission screen.
 function TabBar({ active }: { active: TabKey }) {
   return (
     <nav className="nav" aria-label="Điều hướng chính">

@@ -13,6 +13,7 @@ export const CHANNEL_LABEL: Record<Channel, string> = {
   manual: 'Trực tiếp',
   airbnb: 'Airbnb',
   booking: 'Booking.com',
+  agoda: 'Agoda',
   other: 'iCal khác',
 }
 

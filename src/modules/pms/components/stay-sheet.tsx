@@ -146,7 +146,7 @@ export function StaySheet({
       )}
       {due > 0 && (
         <dl className="panel">
-          <KV label="Tổng tiền phòng">{money(totalOf(b, room))}</KV>
+          <KV label="Tổng tiền">{money(totalOf(b, room))}</KV>
           <KV label="Đã thanh toán">{money(paidOf(b, room))}</KV>
           <KV label="Còn phải thu" total tone="warn">
             {money(due)}

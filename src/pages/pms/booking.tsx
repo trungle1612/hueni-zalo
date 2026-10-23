@@ -5,6 +5,7 @@ import { useNavigate } from 'zmp-ui'
 
 import { needsSheet, StayKind, StaySheet, useStay } from '@/modules/pms/components/stay-sheet'
 import {
+  A,
   AppBar,
   Badge,
   bookingStatus,
@@ -24,6 +25,7 @@ import {
   can,
   canCheckIn,
   canEarlyCheckIn,
+  chargesOf,
   dueOf,
   fmtDate,
   fmtDay,
@@ -44,13 +46,14 @@ import {
   PayMethod,
   PROVIDER_NAME,
   Room,
+  roomTotalOf,
   sourceLabel,
   today,
-  totalOf,
   usePlaceOf,
   usePms,
   whenLabel,
 } from '@/modules/pms/pms.store'
+import { GuestFlagNotice } from '@/pages/pms/guests'
 
 const isToday = (iso?: string) => !!iso && dayjs(iso).isSame(dayjs(), 'day')
 // "08:08" on the planned day, "22/10 08:08" when it happened another day
@@ -141,6 +144,7 @@ export default function BookingPage() {
           <Badge tone={status.tone}>{status.label}</Badge>
           <span className="help">{note}</span>
         </div>
+        <GuestFlagNotice booking={b} />
         {restoreError && (
           <div className="sec">
             <div className="alert" role="alert">
@@ -156,14 +160,26 @@ export default function BookingPage() {
               <KV label="Số khách">{b.guests ? `${b.guests} khách` : 'Chưa rõ'}</KV>
               <KV label="Nguồn">{manual ? b.origin || 'Trực tiếp' : sourceLabel(b)}</KV>
             </dl>
-            {phone && (
+            {manual && (
               <div className="actions">
-                <a className="btn btn-sm" href={`tel:${phone}`}>
-                  Gọi
-                </a>
-                <a className="btn btn-sm" href={`https://zalo.me/${phone}`} target="_blank" rel="noopener noreferrer">
-                  Nhắn Zalo
-                </a>
+                {phone && (
+                  <>
+                    <a className="btn btn-sm" href={`tel:${phone}`}>
+                      Gọi
+                    </a>
+                    <a
+                      className="btn btn-sm"
+                      href={`https://zalo.me/${phone}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      Nhắn Zalo
+                    </a>
+                  </>
+                )}
+                <A className="btn btn-sm" to={`/guests/${b.id}`}>
+                  Hồ sơ khách
+                </A>
               </div>
             )}
           </div>
@@ -221,8 +237,10 @@ export default function BookingPage() {
                     : `${nights(b)} đêm × ${money(nightPrice(b, room))}`
                 }
               >
-                {money(totalOf(b, room))}
+                {money(roomTotalOf(b, room))}
               </KV>
+              {manual && chargesOf(b) > 0 && <KV label="Dịch vụ">{money(chargesOf(b))}</KV>}
+              {manual && b.discount && <KV label="Giảm giá">{money(-b.discount.amount)}</KV>}
               {manual ? (
                 (b.payments || []).map((p, i) => (
                   <KV
@@ -239,11 +257,18 @@ export default function BookingPage() {
                 {money(due)}
               </KV>
             </dl>
-            {due > 0 && (
+            {(due > 0 || manual) && (
               <div className="actions">
-                <button type="button" className="btn btn-sm" onClick={() => setSheet('pay')}>
-                  Ghi nhận thanh toán
-                </button>
+                {due > 0 && (
+                  <button type="button" className="btn btn-sm" onClick={() => setSheet('pay')}>
+                    Ghi nhận thanh toán
+                  </button>
+                )}
+                {manual && (
+                  <A className="btn btn-sm" to={`/bookings/${b.id}/folio`}>
+                    Phiếu tính tiền · dịch vụ · hoá đơn
+                  </A>
+                )}
               </div>
             )}
           </div>
