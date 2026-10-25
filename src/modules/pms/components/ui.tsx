@@ -327,8 +327,9 @@ export function Sheet({
       }
     }
     window.addEventListener('keydown', onKey)
+    // Not the sheet's own ancestors: a sheet rendered inside <main> would go inert with it (/staff froze).
     const behind = Array.from(el.closest('.zaui-page')?.children || []).filter(
-      (c) => c !== el && !c.classList.contains('scrim'),
+      (c) => !c.contains(el) && !c.classList.contains('scrim'),
     )
     behind.forEach((c) => c.setAttribute('inert', ''))
     return () => {
