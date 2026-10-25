@@ -1,6 +1,7 @@
 import React from 'react'
 import { useNavigate } from 'zmp-ui'
 
+import { api } from '@/modules/pms/api'
 import { A, AppBar, Badge, PlaceSub, Screen, Sec, useCurrent } from '@/modules/pms/components/ui'
 import { can, failingFeeds, isStaying, needsCleaning, usePms } from '@/modules/pms/pms.store'
 
@@ -9,7 +10,7 @@ type Item = { to: string; title: string; sub: string; badge?: React.ReactNode }
 // Thêm: the modules beyond the four daily tabs. Owner-only setup is hidden from staff.
 export default function MorePage() {
   const navigate = useNavigate()
-  const { user, bookings, feeds, rooms: allRooms, actions } = usePms()
+  const { user, token, bookings, feeds, rooms: allRooms, actions } = usePms()
   const { place, rooms } = useCurrent()
   const owner = can(place, 'manage')
   const ids = new Set(rooms.map((r) => r.id))
@@ -101,6 +102,8 @@ export default function MorePage() {
               type="button"
               className="row"
               onClick={() => {
+                // Best effort: the token is forgotten here either way.
+                if (token) api('/session', { method: 'DELETE' }).catch(() => {})
                 actions.signOut()
                 navigate('/login', { replace: true })
               }}

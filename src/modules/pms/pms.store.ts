@@ -652,7 +652,8 @@ export type RoomDraft = Pick<
 type Snapshot = Pick<State, 'bookings' | 'rooms' | 'activities'>
 
 type State = {
-  user: { name: string }
+  user: Session['user']
+  token: string // hueni-api bearer; '' in mock mode
   signedIn: boolean
   recent: number[] // booking ids opened lately, newest first (Tìm đặt phòng)
   places: Place[]
@@ -662,7 +663,7 @@ type State = {
   activities: Activity[]
   currentSlug: string
   actions: {
-    signIn: () => void
+    signIn: (session?: Session) => void
     signOut: () => void
     setPlace: (slug: string) => void
     opened: (id: number) => void
@@ -689,14 +690,20 @@ type State = {
   }
 }
 
-const SIGNED_IN = 'pms.signedIn'
-const remembered = () => {
+// POST /app/v1/session's answer; without VITE_API_URL a mock one over the mock places.
+export type Session = { token: string; expires_at?: string; user: { id?: number; name: string }; places: Place[] }
+const MOCK_SESSION: Session = { token: '', user: { name: 'Chị Hoa' }, places }
+
+const SESSION = 'pms.session'
+const remembered = (): Session | undefined => {
   try {
-    return localStorage.getItem(SIGNED_IN) === '1'
+    const s = JSON.parse(localStorage.getItem(SESSION) || 'null') as Session | null
+    if (s?.places.length && !(s.expires_at && new Date(s.expires_at) <= new Date())) return s
   } catch {
-    return false
+    // nothing stored, or private mode
   }
 }
+const saved = remembered()
 
 export const usePms = create<State>((set, get) => {
   const booking = (id: number) => get().bookings.find((b) => b.id === id)!
@@ -726,32 +733,39 @@ export const usePms = create<State>((set, get) => {
     log(b.room_id, 'stay', action, b.guest_name || `Khách ${fmtRange(b)}`, b.id)
 
   return {
-    user: { name: 'Chị Hoa' },
-    signedIn: remembered(),
+    user: (saved || MOCK_SESSION).user,
+    token: saved?.token || '',
+    signedIn: !!saved,
     recent: [],
-    places,
+    places: (saved || MOCK_SESSION).places,
+    // ponytail: rooms, bookings and feeds stay mock until hueni-api has endpoints; real places show no rooms.
     rooms,
     bookings,
     feeds,
     activities,
-    currentSlug: places[0].slug,
+    currentSlug: (saved || MOCK_SESSION).places[0].slug,
     actions: {
-      // ponytail: no real sign-in yet; becomes zmp-sdk getAccessToken → hueni-api (PRODUCT.md: Zalo identity).
-      signIn: () => {
+      signIn: (session = MOCK_SESSION) => {
         try {
-          localStorage.setItem(SIGNED_IN, '1')
+          localStorage.setItem(SESSION, JSON.stringify(session))
         } catch {
           // private mode: signed in for this session only
         }
-        set({ signedIn: true })
+        set({
+          signedIn: true,
+          token: session.token,
+          user: session.user,
+          places: session.places,
+          currentSlug: session.places[0].slug,
+        })
       },
       signOut: () => {
         try {
-          localStorage.removeItem(SIGNED_IN)
+          localStorage.removeItem(SESSION)
         } catch {
           // nothing stored
         }
-        set({ signedIn: false })
+        set({ signedIn: false, token: '' })
       },
       setPlace: (slug) => set({ currentSlug: slug }),
       opened: (id) => set((s) => ({ recent: [id, ...s.recent.filter((x) => x !== id)].slice(0, 5) })),
