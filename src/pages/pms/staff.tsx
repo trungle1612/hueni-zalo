@@ -2,6 +2,7 @@ import './setup.scss'
 
 import React, { useState } from 'react'
 
+import { API_URL } from '@/constants/common'
 import {
   AppBar,
   Badge,
@@ -15,6 +16,7 @@ import {
   useCurrent,
 } from '@/modules/pms/components/ui'
 import { can, fmtTime, money, usePms } from '@/modules/pms/pms.store'
+import { useActivity } from '@/modules/pms/remote'
 import {
   audit,
   AuditEntry,
@@ -324,11 +326,13 @@ function Log() {
   const { place } = useCurrent()
   const extra = useSetup((s) => s.audit)
   const [filter, setFilter] = useState<AuditKind | 'all'>('all')
-  const roomName = (id: number) => rooms.find((r) => r.id === id)?.name
+  const roomName = (id?: number) => rooms.find((r) => r.id === id)?.name
+  // Hoạt động (#38): with hueni-api, the server's lines; the price/role audit (extra) stays mock until #28.
+  const server = useActivity(API_URL ? `/places/${place.id}/activity` : undefined)
 
   const all: AuditEntry[] = [
-    ...activities
-      .filter((a) => a.place_id === place.id && a.kind !== 'sync' && a.kind !== 'error')
+    ...(API_URL ? server.lines : activities.filter((a) => a.place_id === place.id))
+      .filter((a) => a.kind !== 'sync' && a.kind !== 'error')
       .map((a) => ({
         id: -a.id,
         k: kindOf(a.action),
@@ -366,8 +370,13 @@ function Log() {
               </span>
             </div>
           ))}
-          {!list.length && <div className="empty-row">Chưa có thao tác nào.</div>}
+          {!list.length && <div className="empty-row">{server.error || 'Chưa có thao tác nào.'}</div>}
         </div>
+        {server.more && (
+          <button type="button" className="btn btn-block" style={{ marginTop: 8 }} onClick={server.more}>
+            Xem cũ hơn
+          </button>
+        )}
         <p className="help" style={{ marginTop: 8 }}>
           Nhật ký không sửa, không xoá được.
         </p>
