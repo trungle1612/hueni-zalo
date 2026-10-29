@@ -3,6 +3,7 @@ import './sales.scss'
 import dayjs from 'dayjs'
 import React, { useState } from 'react'
 
+import { API_URL } from '@/constants/common'
 import {
   A,
   AppBar,
@@ -38,6 +39,7 @@ import {
   today,
   usePms,
 } from '@/modules/pms/pms.store'
+import { remote } from '@/modules/pms/remote'
 import { useSales } from '@/modules/pms/sales.store'
 
 const ago = (iso: string) => dayjs(iso).fromNow()
@@ -51,7 +53,7 @@ const ICS = /^https:\/\/[^\s/]+\/\S*\.ics(\?\S*)?$/i
 
 // iCal channels per OTA: each room has its own link; only the host is kept and shown (the URL carries OTA tokens).
 export default function ChannelsPage() {
-  const { feeds, bookings, activities, actions } = usePms()
+  const { feeds, bookings, activities } = usePms()
   const { place, rooms, roomOf } = useCurrent()
   const owner = can(place, 'manage')
   const { commission, setCommission } = useSales()
@@ -69,8 +71,9 @@ export default function ChannelsPage() {
     .sort((a, b) => b.at.localeCompare(a.at))
     .slice(0, 5)
 
-  function syncAll() {
-    mine.forEach((f) => actions.sync(f.id)) // a link synced under a minute ago is skipped
+  async function syncAll() {
+    // One at a time: each waits for its OTA. A link synced under a minute ago is skipped.
+    for (const f of mine) await remote.sync(f.id)
     const bad = usePms.getState().feeds.filter((f) => ids.has(f.room_id) && f.last_error).length
     toast(bad ? `Đồng bộ xong · ${bad} link vẫn lỗi` : 'Đồng bộ xong. Phòng trống đã cập nhật')
   }
@@ -208,8 +211,8 @@ export default function ChannelsPage() {
             const error = await record(
               () =>
                 isStaying(m)
-                  ? actions.move(m.id, roomId)
-                  : actions.update(m.id, {
+                  ? remote.move(m.id, roomId)
+                  : remote.update(m.id, {
                       ...draft,
                       status: m.status === 'hold' ? 'hold' : 'confirmed',
                       room_id: roomId,
@@ -300,12 +303,13 @@ function ChannelSheet({
                     <button
                       type="button"
                       className="btn btn-sm"
-                      onClick={() => toast(actions.sync(f.id) || 'Đã đồng bộ. Phòng trống đã cập nhật')}
+                      onClick={async () => toast((await remote.sync(f.id)) || 'Đã đồng bộ. Phòng trống đã cập nhật')}
                     >
                       {f.last_error ? 'Thử lại' : 'Đồng bộ ngay'}
                     </button>
                   )}
-                  {owner && (
+                  {/* With hueni-api, links are added and removed on the web (wiki Mini-App-API, Kênh OTA). */}
+                  {owner && !API_URL && (
                     <button type="button" className="btn btn-sm btn-danger" onClick={() => remove(f)}>
                       Ngắt kết nối
                     </button>
@@ -314,14 +318,17 @@ function ChannelSheet({
               )}
               {f.last_error && (
                 <div className="alert" style={{ flexBasis: '100%' }}>
-                  {FEED_ERROR[f.last_error]}
+                  {f.error_message || FEED_ERROR[f.last_error]}
                 </div>
               )}
             </div>
           ))}
         </div>
       )}
-      {owner && free.length > 0 && (
+      {owner && free.length > 0 && API_URL && (
+        <p className="help">Thêm hoặc ngắt link lịch trên trang quản trị hueni, mục Kênh OTA.</p>
+      )}
+      {owner && free.length > 0 && !API_URL && (
         <div className="panel form">
           <Field label="Phòng">
             {(p) => (
