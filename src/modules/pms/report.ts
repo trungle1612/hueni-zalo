@@ -6,7 +6,7 @@ import { Activity, addDays, Booking, occupiedUntil, occupies, Place, priceOn, Pr
 // A night is a date slept (end_date exclusive); nights sold follow occupiedUntil, like vacancy.
 // Revenue is an estimate: nights × the booking's price (else the room's); unpriced nights are left out of revenue and ADR.
 // A period in progress counts through today (`last`); confirmed nights after it are `ahead`.
-// ponytail: computed client-side from mock data; becomes one GET once hueni-api exposes the report as JSON.
+// Mock mode only: with VITE_API_URL the report page asks GET /places/:id/report (#36).
 
 export type Channel = 'manual' | Provider
 export const CHANNEL_LABEL: Record<Channel, string> = {
