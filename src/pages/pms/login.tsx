@@ -4,8 +4,18 @@ import { getAccessToken, getPhoneNumber } from 'zmp-sdk'
 
 import { API_URL } from '@/constants/common'
 import { api, ApiError } from '@/modules/pms/api'
-import { Screen, Spinner } from '@/modules/pms/components/ui'
+import { Field, Screen, Spinner } from '@/modules/pms/components/ui'
 import { Session, usePms } from '@/modules/pms/pms.store'
+
+// Đăng ký chủ nhà (wiki Mini-App-API): an owner request the hueni admin approves after calling them.
+type Registration = {
+  status: 'pending' | 'approved' | 'rejected'
+  name: string
+  phone_number: string
+  place_name: string
+  maps_url: string | null
+}
+type Unknown = { access_token: string; registration_token: string; registration: Registration | null }
 
 // A known Zalo id signs in. Otherwise, after the user has read why (Zalo's guidance: ask for the phone
 // only when needed, explained first), the Zalo phone links the owner or staff member added in the web admin.
@@ -18,8 +28,15 @@ export default function LoginPage() {
   const { signedIn, actions } = usePms()
   const [waiting, setWaiting] = useState(false)
   const [error, setError] = useState('')
-  const [linking, setLinking] = useState('') // the Zalo access token while asking to use the phone
+  const [linking, setLinking] = useState<Unknown>() // a Zalo account hueni doesn't know yet
+  const [registering, setRegistering] = useState(false)
   if (signedIn) return <Navigate to="/" replace />
+
+  const back = () => {
+    setLinking(undefined)
+    setRegistering(false)
+    setError('')
+  }
 
   async function run(step: () => Promise<Session>) {
     setWaiting(true)
@@ -30,8 +47,8 @@ export default function LoginPage() {
         return setError('Tài khoản chưa thuộc cơ sở nào. Nhờ chủ cơ sở thêm bạn trên trang quản trị hueni.')
       actions.signIn(session)
     } catch (e) {
-      // First not_registered opens the linking step instead of an error.
-      if (e instanceof ApiError && e.code === 'not_registered' && !linking) return
+      // First not_registered opens the linking step; still unknown with the phone → Đăng ký chủ nhà.
+      if (e instanceof ApiError && e.code === 'not_registered') return
       setError(e instanceof ApiError ? e.message : 'Zalo chưa cho phép đăng nhập. Thử lại.')
     } finally {
       setWaiting(false)
@@ -49,15 +66,38 @@ export default function LoginPage() {
       try {
         return await ask(access_token)
       } catch (e) {
-        if (e instanceof ApiError && e.code === 'not_registered') setLinking(access_token)
+        if (e instanceof ApiError && e.code === 'not_registered') setLinking(unknown(access_token, e))
         throw e
       }
     })
   }
 
   function linkByPhone() {
-    run(async () => ask(linking, (await getPhoneNumber()).token))
+    if (!linking) return
+    run(async () => {
+      try {
+        return await ask(linking.access_token, (await getPhoneNumber()).token)
+      } catch (e) {
+        if (e instanceof ApiError && e.code === 'not_registered') {
+          setLinking(unknown(linking.access_token, e))
+          setRegistering(true)
+        }
+        throw e
+      }
+    })
   }
+
+  if (linking && registering)
+    return (
+      <Register
+        unknown={linking}
+        onBack={back}
+        onApproved={() => {
+          back()
+          zalo()
+        }}
+      />
+    )
 
   return (
     <Screen open plain>
@@ -89,11 +129,11 @@ export default function LoginPage() {
                 type="button"
                 className="btn btn-ghost btn-block"
                 disabled={waiting}
-                onClick={() => {
-                  setLinking('')
-                  setError('')
-                }}
+                onClick={() => setRegistering(true)}
               >
+                {linking.registration ? 'Xem yêu cầu đăng ký' : 'Tôi là chủ cơ sở mới: đăng ký'}
+              </button>
+              <button type="button" className="btn btn-ghost btn-block" disabled={waiting} onClick={back}>
                 Quay lại
               </button>
             </>
@@ -127,6 +167,123 @@ export default function LoginPage() {
       <footer className="login-foot">
         Chưa có tài khoản? Chủ cơ sở thêm nhân viên trên trang quản trị hueni, mục Nhân viên.
       </footer>
+    </Screen>
+  )
+}
+
+const unknown = (access_token: string, e: ApiError): Unknown => ({
+  access_token,
+  registration_token: e.body.registration_token as string,
+  registration: (e.body.registration as Registration | null) || null,
+})
+
+const BLANK = { name: '', phone_number: '', place_name: '', maps_url: '' }
+
+function Register({ unknown, onBack, onApproved }: { unknown: Unknown; onBack: () => void; onApproved: () => void }) {
+  const [sent, setSent] = useState(unknown.registration)
+  const [editing, setEditing] = useState(sent?.status !== 'pending')
+  const [f, setF] = useState(sent ? { ...sent, maps_url: sent.maps_url || '' } : BLANK)
+  const [errors, setErrors] = useState<Record<string, string[]>>({})
+  const [error, setError] = useState('')
+  const [waiting, setWaiting] = useState(false)
+  const set = (p: Partial<typeof f>) => setF((x) => ({ ...x, ...p }))
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault()
+    setWaiting(true)
+    setError('')
+    setErrors({})
+    try {
+      const res = await api<{ registration: Registration }>('/registration', {
+        method: sent?.status === 'pending' ? 'PATCH' : 'POST',
+        headers: { 'X-Registration-Token': unknown.registration_token },
+        body: { registration: f },
+      })
+      setSent(res.registration)
+      setEditing(false)
+    } catch (err) {
+      if (!(err instanceof ApiError)) return setError('Có lỗi, thử lại sau ít phút.')
+      if (err.code === 'registered') return onApproved()
+      if (err.code === 'invalid') setErrors(err.body.errors || {})
+      setError(err.code === 'invalid' ? err.body.errors?.base?.join(' ') || '' : err.message)
+    } finally {
+      setWaiting(false)
+    }
+  }
+
+  const fieldError = (k: string) => errors[k]?.join(' ')
+
+  return (
+    <Screen open plain>
+      <main className="scroll login">
+        <div className="brand">
+          <b>hueni</b>
+          <span>Quản lý đặt phòng cho homestay</span>
+        </div>
+        {sent && !editing ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <h1>{sent.status === 'rejected' ? 'Yêu cầu chưa được duyệt' : 'Đã gửi yêu cầu đăng ký'}</h1>
+            <p>
+              {sent.name} · {sent.phone_number}
+              <br />
+              {sent.place_name}
+            </p>
+            <p>
+              {sent.status === 'rejected'
+                ? 'Kiểm tra lại thông tin rồi gửi lại.'
+                : `hueni sẽ gọi số ${sent.phone_number} để xác minh. Duyệt xong, bấm Đăng nhập bằng Zalo lần nữa.`}
+            </p>
+            <button type="button" className="btn btn-primary btn-block" onClick={() => setEditing(true)}>
+              {sent.status === 'rejected' ? 'Gửi lại' : 'Sửa thông tin'}
+            </button>
+            <button type="button" className="btn btn-ghost btn-block" onClick={onBack}>
+              Quay lại
+            </button>
+          </div>
+        ) : (
+          <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <h1>Đăng ký chủ cơ sở</h1>
+            <p>hueni gọi lại số điện thoại này để xác minh trước khi duyệt.</p>
+            {error && (
+              <div className="notice err" role="alert">
+                {error}
+              </div>
+            )}
+            <Field label="Họ tên" error={fieldError('name')}>
+              {(p) => <input {...p} required value={f.name} onChange={(e) => set({ name: e.target.value })} />}
+            </Field>
+            <Field label="Số điện thoại" error={fieldError('phone_number')}>
+              {(p) => (
+                <input
+                  {...p}
+                  required
+                  type="tel"
+                  inputMode="tel"
+                  value={f.phone_number}
+                  onChange={(e) => set({ phone_number: e.target.value })}
+                />
+              )}
+            </Field>
+            <Field label="Tên homestay" error={fieldError('place_name')}>
+              {(p) => (
+                <input {...p} required value={f.place_name} onChange={(e) => set({ place_name: e.target.value })} />
+              )}
+            </Field>
+            <Field label="Link Google Maps" optional error={fieldError('maps_url')}>
+              {(p) => (
+                <input {...p} type="url" value={f.maps_url} onChange={(e) => set({ maps_url: e.target.value })} />
+              )}
+            </Field>
+            <button type="submit" className="btn btn-primary btn-block" style={{ minHeight: 48 }} disabled={waiting}>
+              {waiting && <Spinner />}
+              {sent?.status === 'pending' ? 'Lưu thay đổi' : 'Gửi yêu cầu'}
+            </button>
+            <button type="button" className="btn btn-ghost btn-block" disabled={waiting} onClick={onBack}>
+              Quay lại
+            </button>
+          </form>
+        )}
+      </main>
     </Screen>
   )
 }
