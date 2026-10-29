@@ -1,8 +1,9 @@
 import './guests.scss'
 
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 
+import { API_URL } from '@/constants/common'
 import {
   AppBar,
   Field,
@@ -40,6 +41,14 @@ import {
   usePlaceOf,
   usePms,
 } from '@/modules/pms/pms.store'
+import {
+  addCharges,
+  fetchBooking,
+  remote,
+  removeCharge as dropCharge,
+  setDiscount,
+  useServices,
+} from '@/modules/pms/remote'
 
 type SheetKind = 'add' | 'discount' | 'pay' | 'invoice'
 
@@ -53,6 +62,11 @@ export default function FolioPage() {
   const room = rooms.find((r) => r.id === b?.room_id)
   const place = usePlaceOf(b?.room_id)
   const [sheet, setSheet] = useState<SheetKind>()
+
+  // Services and payments come only with the booking detail.
+  useEffect(() => {
+    if (id) fetchBooking(Number(id))
+  }, [id])
 
   if (!b || !room) {
     return (
@@ -76,16 +90,24 @@ export default function FolioPage() {
 
   const removeCharge = (cid: number) => {
     const c = charges.find((x) => x.id === cid)!
-    record(() => {
-      patchBooking(b.id, { charges: charges.filter((x) => x.id !== cid) })
-      logActivity(b, 'booking', 'Xoá dịch vụ', `${c.qty} × ${c.name}`)
-    }, `Đã xoá ${c.name.toLowerCase()}`)
+    record(
+      () =>
+        API_URL
+          ? dropCharge(b.id, cid)
+          : (patchBooking(b.id, { charges: charges.filter((x) => x.id !== cid) }),
+            logActivity(b, 'booking', 'Xoá dịch vụ', `${c.qty} × ${c.name}`)),
+      `Đã xoá ${c.name.toLowerCase()}`,
+    )
   }
   const removeDiscount = () =>
-    record(() => {
-      patchBooking(b.id, { discount: undefined })
-      logActivity(b, 'booking', 'Bỏ giảm giá', money(b.discount!.amount))
-    }, 'Đã bỏ giảm giá')
+    record(
+      () =>
+        API_URL
+          ? setDiscount(b.id, '')
+          : (patchBooking(b.id, { discount: undefined }),
+            logActivity(b, 'booking', 'Bỏ giảm giá', money(b.discount!.amount))),
+      'Đã bỏ giảm giá',
+    )
 
   return (
     <Screen>
@@ -267,30 +289,39 @@ type SheetProps = { booking: Booking; onClose: () => void }
 
 function AddSheet({ booking: b, onClose }: SheetProps) {
   const record = useRecord()
-  const [qty, setQty] = useState<number[]>(SERVICES.map(() => 0))
-  const count = qty.reduce((n, q) => n + q, 0)
-  const sum = SERVICES.reduce((n, s, i) => n + s.price * qty[i], 0)
-  const step = (i: number, d: number) => setQty(qty.map((q, j) => (j === i ? Math.max(0, q + d) : q)))
+  const services = useServices(usePlaceOf(b.room_id)?.id, SERVICES)
+  const [qty, setQty] = useState<number[]>([])
+  const count = qty.reduce((n, q) => n + (q || 0), 0)
+  const sum = services.reduce((n, s, i) => n + s.price * (qty[i] || 0), 0)
+  const step = (i: number, d: number) =>
+    setQty(services.map((_, j) => (j === i ? Math.max(0, (qty[j] || 0) + d) : qty[j] || 0)))
 
-  function save() {
-    const old = b.charges || []
-    let next = Math.max(0, ...old.map((c) => c.id))
-    const at = new Date().toISOString()
-    const added = SERVICES.flatMap((s, i) => (qty[i] ? [{ ...s, qty: qty[i], id: ++next, at }] : []))
-    record(
+  async function save() {
+    const picked = services.flatMap((s, i) => (qty[i] ? [{ s, qty: qty[i] }] : []))
+    const error = await record(
       () => {
+        if (API_URL)
+          return addCharges(
+            b.id,
+            picked.map((x) => ({ service_id: x.s.id, quantity: x.qty })),
+          )
+        const old = b.charges || []
+        let next = Math.max(0, ...old.map((c) => c.id))
+        const at = new Date().toISOString()
+        const added = picked.map((x) => ({ ...x.s, unit: x.s.unit || '', qty: x.qty, id: ++next, at }))
         patchBooking(b.id, { charges: [...old, ...added] })
         logActivity(b, 'booking', 'Thêm dịch vụ', added.map((c) => `${c.qty} × ${c.name}`).join(', '))
       },
       `Đã thêm ${count} mục · ${money(sum)}`,
     )
-    onClose()
+    if (!error) onClose()
   }
 
   return (
     <Sheet title="Thêm dịch vụ" onClose={onClose}>
       <div className="panel">
-        {SERVICES.map((s, i) => (
+        {!services.length && <div className="empty-row">Chưa có dịch vụ. Chủ cơ sở thêm trên trang quản trị.</div>}
+        {services.map((s, i) => (
           <div key={s.name} className="row">
             <span className="grow">
               <span className="t1" style={{ whiteSpace: 'normal' }}>
@@ -305,7 +336,7 @@ function AddSheet({ booking: b, onClose }: SheetProps) {
                 −
               </button>
               <output aria-live="polite" style={{ minWidth: 40 }}>
-                {qty[i]}
+                {qty[i] || 0}
               </output>
               <button type="button" aria-label="Thêm" onClick={() => step(i, 1)}>
                 +
@@ -339,15 +370,16 @@ function DiscountSheet({ booking: b, room, owner, onClose }: SheetProps & { room
       ? 'Không giảm quá tiền phòng.'
       : `Lễ tân giảm tối đa ${STAFF_DISCOUNT * 100}% tiền phòng (${money(limit)}). Mức cao hơn cần chủ cơ sở.`)
 
-  function save() {
-    record(
+  async function save() {
+    const error = await record(
       () => {
+        if (API_URL) return setDiscount(b.id, String(amount), reason.trim())
         patchBooking(b.id, { discount: { amount, reason: reason.trim() } })
         logActivity(b, 'booking', 'Giảm giá', `${money(-amount)} · ${reason.trim()}`)
       },
       `Đã giảm ${money(amount)} · ghi vào nhật ký`,
     )
-    onClose()
+    if (!error) onClose()
   }
 
   return (
@@ -414,7 +446,6 @@ function DiscountSheet({ booking: b, room, owner, onClose }: SheetProps & { room
 }
 
 function PaySheet({ booking: b, due, onClose }: SheetProps & { due: number }) {
-  const actions = usePms((s) => s.actions)
   const record = useRecord()
   const [amount, setAmount] = useState<number | undefined>(due)
   const [method, setMethod] = useState<PayMethod>('bank')
@@ -440,9 +471,8 @@ function PaySheet({ booking: b, due, onClose }: SheetProps & { due: number }) {
         type="button"
         className="btn btn-primary btn-block"
         disabled={!!bad}
-        onClick={() => {
-          record(() => actions.pay(b.id, amount!, method), `Đã ghi nhận ${money(amount!)}`)
-          onClose()
+        onClick={async () => {
+          if (!(await record(() => remote.pay(b.id, amount!, method), `Đã ghi nhận ${money(amount!)}`))) onClose()
         }}
       >
         Đã nhận {money(amount || 0)}

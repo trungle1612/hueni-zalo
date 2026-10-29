@@ -39,7 +39,7 @@ import {
   today,
   usePms,
 } from '@/modules/pms/pms.store'
-import { remote, useActivity } from '@/modules/pms/remote'
+import { remote, useActivity, useCommissions } from '@/modules/pms/remote'
 import { useSales } from '@/modules/pms/sales.store'
 
 const ago = (iso: string) => dayjs(iso).fromNow()
@@ -56,7 +56,10 @@ export default function ChannelsPage() {
   const { feeds, bookings, activities } = usePms()
   const { place, rooms, roomOf } = useCurrent()
   const owner = can(place, 'manage')
-  const { commission, setCommission } = useSales()
+  const sales = useSales()
+  const { commission, save: saveCommission } = useCommissions(place.id, sales.commission, (k, pct) =>
+    sales.setCommission(k as Provider, pct),
+  )
   const record = useRecord()
   const [open, setOpen] = useState<Provider>()
   const [fixing, setFixing] = useState(false)
@@ -133,7 +136,7 @@ export default function ChannelsPage() {
                       <span className="t1">{PROVIDER_NAME[key]}</span>
                       <span className="t2">
                         {list.length
-                          ? `Hoa hồng ${commission[key]}% · ${list.length} phòng · ${count} đặt tháng này`
+                          ? `Hoa hồng ${commission[key] ?? 0}% · ${list.length} phòng · ${count} đặt tháng này`
                           : 'Chưa nhập link lịch'}
                       </span>
                     </span>
@@ -196,8 +199,12 @@ export default function ChannelsPage() {
           provider={open}
           feeds={mine.filter((f) => f.provider === open)}
           owner={owner}
-          commission={commission[open]}
-          onCommission={(pct) => setCommission(open, pct)}
+          commission={commission[open] ?? 0}
+          onCommission={async (pct) => {
+            if (pct === (commission[open] ?? 0)) return
+            const error = await saveCommission(open, pct)
+            if (error) toast(error)
+          }}
           onClose={() => setOpen(undefined)}
         />
       )}

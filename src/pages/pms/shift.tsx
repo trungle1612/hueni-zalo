@@ -6,6 +6,7 @@ import React, { useState } from 'react'
 import { A, AppBar, Field, KV, MoneyInput, Screen, Sec, Sheet, useCurrent } from '@/modules/pms/components/ui'
 import { OPENING_CASH, STAFF, useOps } from '@/modules/pms/ops.store'
 import { guestLabel, money, PAY_METHOD, usePms } from '@/modules/pms/pms.store'
+import { useMembers } from '@/modules/pms/remote'
 
 const DENOMS = [500000, 200000, 100000, 50000, 20000, 10000]
 const signed = (n: number) => (n > 0 ? `+${money(n)}` : money(n))
@@ -24,7 +25,9 @@ export default function ShiftPage() {
   const [denom, setDenom] = useState<Record<number, number>>({})
   const [note, setNote] = useState('')
   const [tried, setTried] = useState(false)
-  const [next, setNext] = useState(STAFF.find((s) => s !== user.name) || STAFF[0])
+  const staff = useMembers(place.id, STAFF)
+  const [picked, setNext] = useState<string>()
+  const next = picked ?? (staff.find((s) => s !== user.name) || staff[0])
   const [keep, setKeep] = useState<number | undefined>(OPENING_CASH)
   const [spend, setSpend] = useState<{ amount?: number; reason: string }>()
 
@@ -209,9 +212,11 @@ export default function ShiftPage() {
             <Field label="Người nhận ca sau">
               {(p) => (
                 <select {...p} value={next} onChange={(e) => setNext(e.target.value)}>
-                  {STAFF.filter((s) => s !== user.name).map((s) => (
-                    <option key={s}>{s}</option>
-                  ))}
+                  {staff
+                    .filter((s) => s !== user.name)
+                    .map((s) => (
+                      <option key={s}>{s}</option>
+                    ))}
                 </select>
               )}
             </Field>

@@ -3,6 +3,7 @@ import './setup.scss'
 import dayjs from 'dayjs'
 import React, { useState } from 'react'
 
+import { API_URL } from '@/constants/common'
 import {
   A,
   AppBar,
@@ -17,6 +18,7 @@ import {
   useCurrent,
 } from '@/modules/pms/components/ui'
 import { can, fmtDay, money, Room, today, upcomingOn, usePms } from '@/modules/pms/pms.store'
+import { saveRoom } from '@/modules/pms/remote'
 import { audit, POLICY, Policy, Season, seasonOn, SERVICES, SURCHARGES, useSetup } from '@/modules/pms/setup.store'
 
 type Type = { name: string; rooms: Room[]; guests: number; base: number; wknd?: number; mixed: boolean }
@@ -88,14 +90,15 @@ function Types() {
 
   const upcoming = edit ? edit.rooms.reduce((n, r) => n + upcomingOn(bookings, r.id).length, 0) : 0
 
-  function save() {
+  async function save() {
     if (!edit) return
     if (!base) return setTried(true)
     const weekend = wknd && wknd !== base ? wknd : undefined
     const snap = actions.snapshot()
     const prevAudit = useSetup.getState().audit
+    // ponytail: one PATCH per room of the type; a failure part-way leaves the earlier rooms saved (API mode).
     for (const r of edit.rooms) {
-      const res = actions.saveRoom(
+      const res = await saveRoom(
         {
           place_id: r.place_id,
           name: r.name,
@@ -124,10 +127,15 @@ function Types() {
       who: usePms.getState().user.name,
     })
     setEdit(undefined)
-    toast(`Đã lưu giá ${edit.name.toLowerCase()}`, () => {
-      actions.restore(snap)
-      useSetup.setState({ audit: prevAudit })
-    })
+    toast(
+      `Đã lưu giá ${edit.name.toLowerCase()}`,
+      API_URL
+        ? undefined
+        : () => {
+            actions.restore(snap)
+            useSetup.setState({ audit: prevAudit })
+          },
+    )
   }
 
   // ponytail: seasons only show in this preview; bookings price them once hueni-api does (priceOn ignores them).
