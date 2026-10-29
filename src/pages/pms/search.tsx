@@ -1,5 +1,7 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 
+import { API_URL } from '@/constants/common'
+import { api, ApiError } from '@/modules/pms/api'
 import {
   A,
   Badge,
@@ -16,6 +18,14 @@ import { Booking, bookingCode, fmtRange, guestLabel, isStaying, today, usePms } 
 // "Nguyễn Thị Lan" matches "nguyen thi lan".
 const fold = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').toLowerCase()
 
+// POST /places/:id/search: the words go in the body so guest names and phones stay out of URLs and logs.
+type Found = { in_house: Booking[]; upcoming: Booking[]; past: Booking[] }
+const FOUND_TITLES: [keyof Found, string][] = [
+  ['in_house', 'Đang ở'],
+  ['upcoming', 'Sắp đến'],
+  ['past', 'Đã qua và đã huỷ'],
+]
+
 const GROUPS: [string, (b: Booking) => boolean][] = [
   ['Đang ở', isStaying],
   ['Sắp đến', (b) => b.status !== 'cancelled' && !b.checked_in_at && b.end_date > today()],
@@ -25,8 +35,9 @@ const GROUPS: [string, (b: Booking) => boolean][] = [
 export default function SearchPage() {
   const back = useBack()
   const { bookings, recent } = usePms()
-  const { rooms, roomOf } = useCurrent()
+  const { place, rooms, roomOf } = useCurrent()
   const [query, setQuery] = useState('')
+  const [found, setFound] = useState<{ q: string; found?: Found; error?: string }>()
 
   const ids = new Set(rooms.map((r) => r.id))
   const mine = bookings.filter((b) => ids.has(b.room_id))
@@ -34,8 +45,24 @@ export default function SearchPage() {
   const digits = phoneDigits(q)
   const isPhone = digits.length >= 3 && digits.length === q.replace(/[\s+.-]/g, '').length
   const fq = fold(q).replace(/-/g, '')
-  const hits =
-    q.length >= 2
+
+  // Ask the server once typing pauses.
+  useEffect(() => {
+    if (!API_URL || q.length < 2) return
+    const timer = setTimeout(
+      () =>
+        api<Found>(`/places/${place.id}/search`, { body: { q } })
+          .then((f) => setFound({ q, found: f }))
+          .catch((e) => setFound({ q, error: e instanceof ApiError ? e.message : 'Không tìm được, thử lại.' })),
+      300,
+    )
+    return () => clearTimeout(timer)
+  }, [q, place.id])
+  const served = API_URL && found?.q === q ? found.found : undefined
+
+  const hits = served
+    ? FOUND_TITLES.flatMap(([k]) => served[k])
+    : !API_URL && q.length >= 2
       ? mine
           .filter(
             (b) =>
@@ -46,11 +73,16 @@ export default function SearchPage() {
           .sort((a, b) => b.start_date.localeCompare(a.start_date))
       : []
   const seen = new Set<number>()
-  const groups = GROUPS.map(([title, test]) => {
-    const items = hits.filter((b) => !seen.has(b.id) && test(b))
-    items.forEach((b) => seen.add(b.id))
-    return { title, items }
-  }).filter((g) => g.items.length)
+  const groups = (
+    served
+      ? FOUND_TITLES.map(([k, title]) => ({ title, items: served[k] }))
+      : GROUPS.map(([title, test]) => {
+          const items = hits.filter((b) => !seen.has(b.id) && test(b))
+          items.forEach((b) => seen.add(b.id))
+          return { title, items }
+        })
+  ).filter((g) => g.items.length)
+  const waiting = !!API_URL && q.length >= 2 && found?.q !== q
 
   const row = (b: Booking) => {
     const s = bookingStatus(b)
@@ -138,7 +170,9 @@ export default function SearchPage() {
             ))}
           </>
         )}
-        {q.length >= 2 && !hits.length && (
+        {waiting && <div className="empty">Đang tìm…</div>}
+        {API_URL && found?.q === q && found.error && <div className="empty">{found.error}</div>}
+        {q.length >= 2 && !waiting && !found?.error && !hits.length && (
           <div className="empty">
             <div style={{ color: 'var(--text)', fontWeight: 600 }}>Không có đặt phòng khớp “{q}”.</div>
             <div>Kiểm tra lại chính tả hoặc số điện thoại. Khách mới thì tạo đặt phòng.</div>

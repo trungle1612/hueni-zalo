@@ -1,8 +1,10 @@
 import './sales.scss'
 
 import dayjs from 'dayjs'
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 
+import { API_URL } from '@/constants/common'
+import { api, ApiError } from '@/modules/pms/api'
 import { A, AppBar, PlaceSub, Screen, Sec, Sheet, toast, useCurrent } from '@/modules/pms/components/ui'
 import {
   addDays,
@@ -21,7 +23,7 @@ import {
   usePms,
   weekday,
 } from '@/modules/pms/pms.store'
-import { buildReport, CHANNEL_LABEL, monthStart } from '@/modules/pms/report'
+import { buildReport, Channel, CHANNEL_LABEL, monthStart, Report } from '@/modules/pms/report'
 import { groupCode, useSales } from '@/modules/pms/sales.store'
 
 const fmt = (d: dayjs.Dayjs) => d.format('YYYY-MM-DD')
@@ -47,6 +49,75 @@ function periods() {
   ]
 }
 
+// GET /places/:id/report (wiki Mini-App-API, Báo cáo): the server's Report, owners only.
+type ApiReport = {
+  first: string
+  last: string
+  days: number
+  current: boolean
+  future: boolean
+  empty: boolean
+  revenue: number
+  sold: number
+  available: number
+  occupancy: number | null
+  adr: number | null
+  unpriced: boolean
+  ahead: number
+  ahead_revenue: number
+  alos: number | null
+  booking_count: number
+  outcomes: { confirmed: number; cancelled: number }
+  ota_cancelled: number
+  cancellation_rate: number | null
+  due: number
+  channels: {
+    key: Channel
+    nights: number
+    bookings: number
+    revenue: number
+    commission: number | null
+    net: number
+  }[]
+  rooms: { room_id: number; name: string; sold: number; revenue: number | null }[]
+  debts: (Booking & { due: number; overdue: boolean })[]
+}
+const query = (p: { start: string; byDay: boolean }) => (p.byDay ? 'period=7d' : `month=${p.start.slice(0, 7)}`)
+
+// The server's report in the shape the page draws. It has no revenue per day, so no chart.
+// ponytail: ask hueni-api for nightly revenue if owners miss the chart.
+const fromApi = (x: ApiReport): Report => ({
+  month: x.first,
+  last: x.last,
+  nightly: {},
+  current: x.current,
+  future: x.future,
+  partial: x.current,
+  days: x.days,
+  rooms: x.rooms.map((r) => ({
+    room: { id: r.room_id, name: r.name } as Report['rooms'][number]['room'],
+    sold: r.sold,
+    held: 0,
+    revenue: r.revenue ?? undefined,
+  })),
+  sold: x.sold,
+  held: 0,
+  available: x.available,
+  occupancy: x.occupancy ?? undefined,
+  revenue: x.revenue,
+  adr: x.adr ?? undefined,
+  unpricedRooms: x.unpriced,
+  ahead: x.ahead,
+  aheadRevenue: x.ahead_revenue,
+  channels: x.channels,
+  bookingCount: x.booking_count,
+  outcomes: { ...x.outcomes, hold: 0 },
+  alos: x.alos ?? undefined,
+  otaCancelled: x.ota_cancelled,
+  cancellationRate: x.cancellation_rate ?? undefined,
+  empty: x.empty,
+})
+
 // "15 – 21/10/2026"
 const rangeLabel = (a: string, b: string) => {
   const [da, db] = [dayjs(a), dayjs(b)]
@@ -61,8 +132,20 @@ export default function ReportPage() {
   const [period, setPeriod] = useState(0)
   const [sel, setSel] = useState<number>()
   const [exporting, setExporting] = useState(false)
+  const [server, setServer] = useState<ApiReport | string>() // the report, or why it didn't load
+  const owner = can(place, 'manage')
+  const p = periods()[period]
+  const q = query(p)
 
-  if (!can(place, 'manage')) {
+  useEffect(() => {
+    if (!API_URL || !owner) return
+    setServer(undefined)
+    api<ApiReport>(`/places/${place.id}/report?${q}`)
+      .then(setServer)
+      .catch((e) => setServer(e instanceof ApiError ? e.message : 'Không tải được báo cáo.'))
+  }, [place.id, q, owner])
+
+  if (!owner) {
     return (
       <Screen tab="/report">
         <AppBar title="Báo cáo" sub={<PlaceSub />} />
@@ -87,21 +170,33 @@ export default function ReportPage() {
     )
   }
 
-  const p = periods()[period]
-  const r = buildReport({ place, rooms, bookings, activities }, p.start, p.end)
+  if (API_URL && typeof server !== 'object')
+    return (
+      <Screen tab="/report">
+        <AppBar title="Báo cáo" sub={<PlaceSub />} />
+        <main className="scroll">
+          <div className="empty">{server || 'Đang tải…'}</div>
+        </main>
+      </Screen>
+    )
+
+  const rep = typeof server === 'object' ? server : undefined
+  const r = rep ? fromApi(rep) : buildReport({ place, rooms, bookings, activities }, p.start, p.end)
   const range = rangeLabel(r.month, r.last)
   const ids = new Set(rooms.map((x) => x.id))
-  const due = bookings
-    .filter((b) => ids.has(b.room_id) && occupies(b, r.month, addDays(r.last, 1)))
-    .reduce(
-      (n, b) =>
-        n +
-        dueOf(
-          b,
-          rooms.find((x) => x.id === b.room_id),
-        ),
-      0,
-    )
+  const due = rep
+    ? rep.due
+    : bookings
+        .filter((b) => ids.has(b.room_id) && occupies(b, r.month, addDays(r.last, 1)))
+        .reduce(
+          (n, b) =>
+            n +
+            dueOf(
+              b,
+              rooms.find((x) => x.id === b.room_id),
+            ),
+          0,
+        )
 
   // Bars: one per day for 7 days, else weeks starting on the 1st, 8th, 15th, 22nd (the last runs to the end).
   const bars: { label: string; value: number }[] = []
@@ -130,15 +225,21 @@ export default function ReportPage() {
       ? 'Doanh thu đều trong kỳ'
       : `${bars[maxIdx].label} cao nhất ${p.byDay ? 'tuần' : 'tháng'}`
 
-  const channels = r.channels
-    .filter((c) => c.revenue)
-    .sort((a, b) => b.revenue - a.revenue)
-    .map((c) => ({ ...c, pct: commission[c.key], net: Math.round((c.revenue * (100 - commission[c.key])) / 100) }))
+  const channels = rep
+    ? rep.channels
+        .filter((c) => c.revenue)
+        .sort((a, b) => b.revenue - a.revenue)
+        .map((c) => ({ ...c, pct: c.commission || 0 }))
+    : r.channels
+        .filter((c) => c.revenue)
+        .sort((a, b) => b.revenue - a.revenue)
+        .map((c) => ({ ...c, pct: commission[c.key], net: Math.round((c.revenue * (100 - commission[c.key])) / 100) }))
 
   // Công nợ chưa thu: every open balance of the place, not only this period. A group billed as one is one line.
   const receivables = receivablesOf(
-    bookings.filter((b) => ids.has(b.room_id)),
+    rep ? rep.debts : bookings.filter((b) => ids.has(b.room_id)),
     (b) =>
+      rep?.debts.find((d) => d.id === b.id)?.due ??
       dueOf(
         b,
         rooms.find((x) => x.id === b.room_id),
@@ -162,7 +263,8 @@ export default function ReportPage() {
     .sort((a, b) => (b.revenue || 0) - (a.revenue || 0) || b.sold - a.sold)
     .slice(0, 5)
 
-  function download() {
+  async function download() {
+    if (API_URL) return downloadFromServer()
     const lines = [
       ['Báo cáo', place.name, range],
       ['Doanh thu (đ)', r.revenue],
@@ -195,6 +297,22 @@ export default function ReportPage() {
     a.click()
     URL.revokeObjectURL(a.href)
     setExporting(false)
+    toast(`Đã tạo ${name}, xem trong mục Tải về`)
+  }
+
+  // GET …/report.csv needs the bearer, so fetch it, then save the blob. Same name as the web's.
+  async function downloadFromServer() {
+    const res = await fetch(`${API_URL}/api/v1/places/${place.id}/report.csv?${query(p)}`, {
+      headers: { Authorization: `Bearer ${usePms.getState().token}` },
+    }).catch(() => undefined)
+    setExporting(false)
+    if (!res?.ok) return toast('Không tải được file CSV. Thử lại sau ít phút.')
+    const name = `bao-cao-${place.slug}-${r.month}-${r.last}.csv`
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(await res.blob())
+    a.download = name
+    a.click()
+    URL.revokeObjectURL(a.href)
     toast(`Đã tạo ${name}, xem trong mục Tải về`)
   }
 
@@ -243,47 +361,49 @@ export default function ReportPage() {
           </div>
         </div>
 
-        <Sec title={chartTitle} aside={<span className="aside">triệu đồng</span>}>
-          <div className="panel chart">
-            <div
-              className="plot"
-              role="group"
-              aria-label={`${chartTitle}. ${bars.map((b) => `${b.label}: ${million(b.value)} triệu`).join('; ')}`}
-            >
-              <div className="gl" style={{ top: 16 }}>
-                <span>{scale}</span>
+        {!rep && (
+          <Sec title={chartTitle} aside={<span className="aside">triệu đồng</span>}>
+            <div className="panel chart">
+              <div
+                className="plot"
+                role="group"
+                aria-label={`${chartTitle}. ${bars.map((b) => `${b.label}: ${million(b.value)} triệu`).join('; ')}`}
+              >
+                <div className="gl" style={{ top: 16 }}>
+                  <span>{scale}</span>
+                </div>
+                <div className="gl" style={{ top: 72 }}>
+                  <span>{String(scale / 2).replace('.', ',')}</span>
+                </div>
+                <div className="gl" style={{ top: '100%', borderTop: 0 }}>
+                  <span>0</span>
+                </div>
+                <div className="bars">
+                  {bars.map((b, i) => (
+                    <button
+                      key={b.label}
+                      type="button"
+                      className="bcol"
+                      aria-label={`${b.label}: ${million(b.value)} triệu`}
+                      aria-pressed={i === on}
+                      onClick={() => setSel(i)}
+                    >
+                      <span className="v">{million(b.value)}</span>
+                      <span className="b" style={{ height: Math.round((b.value / 1e6 / scale) * 112) }} />
+                    </button>
+                  ))}
+                </div>
               </div>
-              <div className="gl" style={{ top: 72 }}>
-                <span>{String(scale / 2).replace('.', ',')}</span>
-              </div>
-              <div className="gl" style={{ top: '100%', borderTop: 0 }}>
-                <span>0</span>
-              </div>
-              <div className="bars">
+              <div className="xl" aria-hidden="true">
                 {bars.map((b, i) => (
-                  <button
-                    key={b.label}
-                    type="button"
-                    className="bcol"
-                    aria-label={`${b.label}: ${million(b.value)} triệu`}
-                    aria-pressed={i === on}
-                    onClick={() => setSel(i)}
-                  >
-                    <span className="v">{million(b.value)}</span>
-                    <span className="b" style={{ height: Math.round((b.value / 1e6 / scale) * 112) }} />
-                  </button>
+                  <span key={b.label} className={i === on ? 'on' : undefined}>
+                    {b.label}
+                  </span>
                 ))}
               </div>
             </div>
-            <div className="xl" aria-hidden="true">
-              {bars.map((b, i) => (
-                <span key={b.label} className={i === on ? 'on' : undefined}>
-                  {b.label}
-                </span>
-              ))}
-            </div>
-          </div>
-        </Sec>
+          </Sec>
+        )}
 
         <Sec title="Theo nguồn đặt">
           <div className="panel">
