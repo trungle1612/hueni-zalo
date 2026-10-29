@@ -3,7 +3,7 @@ import React, { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { useNavigate } from 'zmp-ui'
 
-import { needsSheet, StayKind, StaySheet, useStay } from '@/modules/pms/components/stay-sheet'
+import { StayKind, StaySheet, useStartStay } from '@/modules/pms/components/stay-sheet'
 import {
   A,
   AppBar,
@@ -53,6 +53,7 @@ import {
   usePms,
   whenLabel,
 } from '@/modules/pms/pms.store'
+import { fetchBooking, remote } from '@/modules/pms/remote'
 import { GuestFlagNotice } from '@/pages/pms/guests'
 
 const isToday = (iso?: string) => !!iso && dayjs(iso).isSame(dayjs(), 'day')
@@ -69,16 +70,29 @@ export default function BookingPage() {
   const b = bookings.find((x) => x.id === Number(id))
   const room = rooms.find((r) => r.id === b?.room_id)
   const place = usePlaceOf(b?.room_id)
-  const stay = useStay()
   const record = useRecord()
   const [sheet, setSheet] = useState<SheetKind>()
   const [restoreError, setRestoreError] = useState<string>()
+  const [loading, setLoading] = useState(true)
+  const startStay = useStartStay((kind) => setSheet(kind))
 
   useEffect(() => {
-    if (id) actions.opened(Number(id))
+    if (!id) return
+    actions.opened(Number(id))
+    // The money, payments and cancelled bookings come only with the detail.
+    fetchBooking(Number(id)).finally(() => setLoading(false))
   }, [id, actions])
 
   if (!b || !room) {
+    if (loading)
+      return (
+        <Screen>
+          <AppBar lead="back" title="Đặt phòng" />
+          <main className="scroll">
+            <div className="empty">Đang tải…</div>
+          </main>
+        </Screen>
+      )
     return (
       <Screen>
         <AppBar lead="back" title="Đặt phòng" />
@@ -106,27 +120,22 @@ export default function BookingPage() {
           ? `Nhận ${fmtDay(b.start_date)} · trả ${fmtDay(b.end_date)}` // the badge already says Đang ở / Trả hôm nay
           : whenLabel(b)
 
-  function startStay(kind: StayKind) {
-    if (kind === 'early' || needsSheet(kind, b!, room!, bookings)) return setSheet(kind)
-    if (stay(kind, b!, room!)) setSheet(kind)
-  }
-
   const main: { label: string; run: () => void } | undefined = isStaying(b)
-    ? { label: 'Trả phòng', run: () => startStay('out') }
+    ? { label: 'Trả phòng', run: () => startStay('out', b, room) }
     : canCheckIn(b)
-      ? { label: 'Nhận phòng', run: () => startStay('in') }
+      ? { label: 'Nhận phòng', run: () => startStay('in', b, room) }
       : b.status === 'hold'
         ? {
             label: 'Xác nhận đặt phòng',
-            run: () => record(() => actions.confirm(b.id), `Đã xác nhận ${bookingCode(b)}`),
+            run: () => record(() => remote.confirm(b.id), `Đã xác nhận ${bookingCode(b)}`),
           }
         : canEarlyCheckIn(b)
           ? { label: 'Nhận phòng sớm', run: () => setSheet('early') }
           : b.status === 'cancelled' && manual
             ? { label: 'Khôi phục đặt phòng', run: () => restore() }
             : undefined
-  function restore() {
-    setRestoreError(record(() => actions.uncancel(b!.id), `Đã khôi phục ${bookingCode(b!)}`) || undefined)
+  async function restore() {
+    setRestoreError((await record(() => remote.uncancel(b!.id), `Đã khôi phục ${bookingCode(b!)}`)) || undefined)
   }
 
   return (
@@ -212,7 +221,7 @@ export default function BookingPage() {
                   <button
                     type="button"
                     className="btn btn-sm"
-                    onClick={() => record(() => actions.declare(b.id), 'Đã ghi: đã khai báo lưu trú')}
+                    onClick={() => record(() => remote.declare(b.id), 'Đã ghi: đã khai báo lưu trú')}
                   >
                     Đã khai báo
                   </button>
@@ -342,7 +351,6 @@ export default function BookingPage() {
 type SheetProps = { booking: Booking; room: Room; onClose: () => void }
 
 function PaySheet({ booking: b, room, onClose }: SheetProps) {
-  const actions = usePms((s) => s.actions)
   const record = useRecord()
   const due = dueOf(b, room)
   const [amount, setAmount] = useState<number | undefined>(due)
@@ -351,10 +359,9 @@ function PaySheet({ booking: b, room, onClose }: SheetProps) {
   const bad =
     !amount || amount <= 0 ? 'Nhập số tiền lớn hơn 0.' : amount > due && `Số tiền không được lớn hơn ${money(due)}.`
 
-  function save() {
+  async function save() {
     if (bad) return setTried(true)
-    record(() => actions.pay(b.id, amount!, method), `Đã ghi nhận ${money(amount!)}`)
-    onClose()
+    if (!(await record(() => remote.pay(b.id, amount!, method), `Đã ghi nhận ${money(amount!)}`))) onClose()
   }
 
   return (
@@ -385,7 +392,6 @@ function PaySheet({ booking: b, room, onClose }: SheetProps) {
 const REASONS = ['Khách huỷ', 'Khách không đến', 'Đặt trùng', 'Lý do khác']
 
 function CancelSheet({ booking: b, room, owner, onClose }: SheetProps & { owner: boolean }) {
-  const actions = usePms((s) => s.actions)
   const record = useRecord()
   const paid = paidOf(b, room)
   const [reason, setReason] = useState<string>()
@@ -394,7 +400,7 @@ function CancelSheet({ booking: b, room, owner, onClose }: SheetProps & { owner:
   const [method, setMethod] = useState<PayMethod>('cash')
   const ready = !!reason && (!paid || refund !== undefined)
 
-  function confirm() {
+  async function confirm() {
     if (!ready) return
     const dep = !paid
       ? ''
@@ -403,14 +409,11 @@ function CancelSheet({ booking: b, room, owner, onClose }: SheetProps & { owner:
           ? `hoàn cọc ${money(paid)} ${PAY_METHOD[method].toLowerCase()}`
           : `chờ duyệt hoàn cọc ${money(paid)}`
         : `giữ cọc ${money(paid)}`
-    record(
-      () => {
-        if (refund && owner) actions.pay(b.id, -paid, method)
-        return actions.cancel(b.id, [reason, dep].filter(Boolean).join(', '))
-      },
+    const error = await record(
+      () => remote.cancel(b.id, [reason, dep].filter(Boolean).join(', '), refund && owner ? method : undefined),
       `Đã huỷ ${bookingCode(b)}${dep ? ` · ${dep}` : ''}`,
     )
-    onClose()
+    if (!error) onClose()
   }
 
   return (
@@ -473,7 +476,7 @@ function CancelSheet({ booking: b, room, owner, onClose }: SheetProps & { owner:
 }
 
 function MoveSheet({ booking: b, room, onClose }: SheetProps) {
-  const { rooms, bookings, actions } = usePms()
+  const { rooms, bookings } = usePms()
   const record = useRecord()
   const free = rooms.filter(
     (r) =>
@@ -505,9 +508,12 @@ function MoveSheet({ booking: b, room, onClose }: SheetProps) {
         type="button"
         className="btn btn-primary btn-block"
         disabled={!target}
-        onClick={() => {
-          record(() => actions.move(b.id, target!.id), `Đã đổi ${guestLabel(b)} sang phòng ${target!.name}`)
-          onClose()
+        onClick={async () => {
+          const error = await record(
+            () => remote.move(b.id, target!.id),
+            `Đã đổi ${guestLabel(b)} sang phòng ${target!.name}`,
+          )
+          if (!error) onClose()
         }}
       >
         {target ? `Đổi sang phòng ${target.name}` : 'Chọn phòng'}
@@ -520,7 +526,6 @@ function MoveSheet({ booking: b, room, onClose }: SheetProps) {
 }
 
 function UndoSheet({ booking: b, room, out, onClose }: SheetProps & { out: boolean }) {
-  const actions = usePms((s) => s.actions)
   const record = useRecord()
   const [error, setError] = useState<string>()
   const what = out ? 'trả phòng' : 'nhận phòng'
@@ -539,9 +544,9 @@ function UndoSheet({ booking: b, room, out, onClose }: SheetProps & { out: boole
       <button
         type="button"
         className="btn btn-primary btn-block"
-        onClick={() => {
-          const err = record(
-            () => (out ? actions.undoCheckOut(b.id) : actions.undoCheckIn(b.id)),
+        onClick={async () => {
+          const err = await record(
+            () => (out ? remote.undoCheckOut(b.id) : remote.undoCheckIn(b.id)),
             `Đã hoàn tác ${what} ${room.name}`,
           )
           if (err) setError(err)

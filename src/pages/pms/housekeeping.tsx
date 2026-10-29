@@ -5,12 +5,13 @@ import React, { useState } from 'react'
 import { AppBar, Badge, Field, Screen, Sec, Sheet, toast, useCurrent, useRecord } from '@/modules/pms/components/ui'
 import { CHECKLIST, cleanOf, patchClean, STAFF, useOps } from '@/modules/pms/ops.store'
 import { fmtDate, guestLabel, isStaying, needsCleaning, Room, today, usePms } from '@/modules/pms/pms.store'
+import { remote } from '@/modules/pms/remote'
 
 type Task = { room: Room; daily: boolean; note: string; urgent: boolean; done: boolean; who: string; started: boolean }
 
 // Buồng phòng: a cleaning job per dirty room (made by checkout), plus a daily tidy for rooms with guests in.
 export default function HousekeepingPage() {
-  const { bookings, actions } = usePms()
+  const { bookings } = usePms()
   const { cleans } = useOps()
   const { rooms } = useCurrent()
   const record = useRecord()
@@ -58,14 +59,13 @@ export default function HousekeepingPage() {
   const left = tasks.filter((t) => !t.done)
   const urgent = left.filter((t) => t.urgent).length
 
-  function finish(t: Task) {
+  async function finish(t: Task) {
     const extra = issue.trim() ? ' · đã báo hỏng cho chủ cơ sở' : ''
     if (t.daily && !needsCleaning(t.room)) {
       patchClean(t.room.id, { done: today() })
       toast(`Đã dọn phòng ${t.room.name}${extra}`)
     } else {
-      const error = record(() => actions.clean(t.room.id), `Phòng ${t.room.name} đã sẵn sàng${extra}`)
-      if (error) return toast(error)
+      if (await record(() => remote.clean(t.room.id), `Phòng ${t.room.name} đã sẵn sàng${extra}`)) return
       patchClean(t.room.id, { done: today() })
     }
     // ponytail: the damage note only goes into the toast; it becomes a room issue for the owner with the API.

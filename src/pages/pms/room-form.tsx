@@ -447,9 +447,8 @@ function Form({ room, placeId, placeName }: { room?: Room; placeId: number; plac
           <button
             type="button"
             className="btn btn-danger btn-block"
-            onClick={() => {
-              const error = record(() => actions.deleteRoom(room.id), `Đã xoá phòng ${room.name}`)
-              if (error) return toast(error)
+            onClick={async () => {
+              if (await record(() => actions.deleteRoom(room.id), `Đã xoá phòng ${room.name}`)) return
               navigate('/rooms', { replace: true })
             }}
           >

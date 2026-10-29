@@ -17,6 +17,7 @@ import {
   totalOf,
   usePms,
 } from '../pms.store'
+import { fetchBooking, remote } from '../remote'
 import { Field, KV, Segmented, Sheet, useRecord } from './ui'
 
 export type StayKind = 'in' | 'early' | 'out'
@@ -35,7 +36,6 @@ export function needsSheet(kind: StayKind, b: Booking, room: Room, all: Booking[
 }
 
 export function useStay() {
-  const actions = usePms((s) => s.actions)
   const record = useRecord()
   // pay first so Hoàn tác takes both back at once
   return (
@@ -51,14 +51,29 @@ export function useStay() {
         ? ` · ghi nợ ${money(dueOf(b, room))}`
         : ''
     return record(
-      () => {
-        if (opts.collect) actions.pay(b.id, opts.collect, opts.method || 'cash')
-        if (kind === 'out') return actions.checkOut(b.id)
-        if (kind === 'early') return actions.earlyCheckIn(b.id)
-        return actions.checkIn(b.id, opts.guests)
+      async () => {
+        // ponytail: two requests; a refused check-in keeps the payment, which the guest did hand over.
+        if (opts.collect) {
+          const error = await remote.pay(b.id, opts.collect, opts.method || 'cash')
+          if (error) return error
+        }
+        if (kind === 'out') return remote.checkOut(b.id)
+        if (kind === 'early') return remote.earlyCheckIn(b.id)
+        return remote.checkIn(b.id, opts.guests)
       },
       `Đã ${verb} ${room.name}${note}${kind === 'out' ? ' · phòng cần dọn' : ''}`,
     )
+  }
+}
+
+// A Nhận / Trả tap: straight through when nothing needs deciding, else the sheet (it also says why a
+// refused tap failed). The booking is fetched first: with hueni-api only the detail knows what is owed.
+export function useStartStay(open: (kind: StayKind, id: number) => void) {
+  const stay = useStay()
+  return async (kind: StayKind, booking: Booking, room: Room) => {
+    const b = (await fetchBooking(booking.id)) || booking
+    if (kind === 'early' || needsSheet(kind, b, room, usePms.getState().bookings)) return open(kind, b.id)
+    if (await stay(kind, b, room)) open(kind, b.id)
   }
 }
 
@@ -91,9 +106,9 @@ export function StaySheet({
   const stillIn = isIn && all.find((x) => x.id !== b.id && x.room_id === b.room_id && isStaying(x))
   const guestsBad = isIn && !b.guests && !(guests && guests >= 1)
 
-  function go(collect?: number) {
+  async function go(collect?: number) {
     if (guestsBad) return setTried(true)
-    const err = stay(kind, b, room, { collect, method, guests })
+    const err = await stay(kind, b, room, { collect, method, guests })
     if (err) setError(err)
     else onClose()
   }
