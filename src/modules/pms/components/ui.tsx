@@ -1,5 +1,6 @@
 import React, { useEffect, useId, useRef } from 'react'
 import { Navigate } from 'react-router-dom'
+import { openPhone, openWebview } from 'zmp-sdk'
 import { Page, useNavigate } from 'zmp-ui'
 import { create } from 'zustand'
 
@@ -498,6 +499,38 @@ export function MoneyInput({
 }
 
 export const phoneDigits = (s?: string) => (s || '').replace(/\D/g, '')
+
+// Gọi / Nhắn Zalo for a guest's phone. Zalo's webview ignores tel: links and target=_blank, so these go through
+// zmp-sdk; outside Zalo (a browser in dev) they fall back to the plain links.
+export function ContactButtons({ phone }: { phone?: string }) {
+  const digits = phoneDigits(phone)
+  if (!digits) return null
+  const dial = phone!.trim().startsWith('+') ? `+${digits}` : digits
+  // zalo.me/<số> opens the chat with that Zalo account; it wants the local 0… form for Vietnamese numbers.
+  const zalo = digits.startsWith('84') && digits.length === 11 ? `0${digits.slice(2)}` : digits
+  return (
+    <>
+      <button
+        type="button"
+        className="btn btn-sm"
+        onClick={() => openPhone({ phoneNumber: dial }).catch(() => (window.location.href = `tel:${dial}`))}
+      >
+        Gọi
+      </button>
+      <button
+        type="button"
+        className="btn btn-sm"
+        onClick={() =>
+          openWebview({ url: `https://zalo.me/${zalo}`, config: { style: 'normal' } }).catch(() =>
+            window.open(`https://zalo.me/${zalo}`, '_blank', 'noopener'),
+          )
+        }
+      >
+        Nhắn Zalo
+      </button>
+    </>
+  )
+}
 export const PHONE_ERROR = 'Số điện thoại cần ít nhất 9 chữ số.'
 
 // Joined buttons for one choice (payment method, booking status).

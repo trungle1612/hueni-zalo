@@ -8,6 +8,7 @@ import {
   AppBar,
   Badge,
   bookingStatus,
+  ContactButtons,
   Field,
   Icon,
   KV,
@@ -261,12 +262,7 @@ function Profile({ bookingId }: { bookingId: number }) {
             </dl>
             {phone && (
               <div className="actions">
-                <a className="btn btn-sm" href={`tel:${phone}`}>
-                  Gọi
-                </a>
-                <a className="btn btn-sm" href={`https://zalo.me/${phone}`} target="_blank" rel="noopener noreferrer">
-                  Nhắn Zalo
-                </a>
+                <ContactButtons phone={mine.find((x) => x.guest_phone)?.guest_phone} />
               </div>
             )}
           </div>
