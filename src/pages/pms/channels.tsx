@@ -20,6 +20,7 @@ import {
   useCurrent,
   useRecord,
 } from '@/modules/pms/components/ui'
+import { isLive } from '@/modules/pms/live'
 import {
   Booking,
   bookingCode,
@@ -145,7 +146,7 @@ export default function ChannelsPage() {
                 )
               },
             )}
-            {owner && (
+            {owner && isLive('/booking-site') && (
               <A className="row" to="/booking-site">
                 <span className="logo" aria-hidden="true">
                   W

@@ -19,6 +19,7 @@ import {
   useRecord,
 } from '@/modules/pms/components/ui'
 import { logActivity, patchBooking, SERVICES, STAFF_DISCOUNT, useGuests } from '@/modules/pms/guests.store'
+import { isLive } from '@/modules/pms/live'
 import {
   Booking,
   bookingCode,
@@ -224,7 +225,7 @@ export default function FolioPage() {
           </dl>
         </div>
 
-        {!ota && (
+        {!ota && isLive('folio-documents') && (
           <Sec title="Chứng từ">
             <div className="panel">
               <div className="row">
