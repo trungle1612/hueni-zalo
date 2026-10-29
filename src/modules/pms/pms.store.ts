@@ -185,8 +185,25 @@ export const dueOf = (b: Booking, room?: Room) =>
 export const awaitingDeposit = (b: Booking, room?: Room) =>
   b.awaiting_deposit ?? (b.source === 'manual' && dueOf(b, room) > 0 && !paidOf(b, room))
 export const PAY_METHOD: Record<PayMethod, string> = { cash: 'Tiền mặt', bank: 'Chuyển khoản', card: 'Thẻ' }
-export const ROOM_KINDS = ['Phòng đôi', 'Phòng 2 giường', 'Phòng gia đình', 'Phòng đơn']
-export const AMENITIES = ['Máy lạnh', 'Cửa sổ', 'Ban công', 'Bồn tắm', 'Bếp nhỏ', 'Bàn làm việc']
+// hueni-api's room_type and amenity codes (wiki Mini-App-API, Phòng) → the labels shown and kept in the store.
+export const ROOM_TYPE: Record<string, string> = {
+  single: 'Phòng đơn',
+  double: 'Phòng đôi',
+  family: 'Phòng gia đình',
+  dorm: 'Dorm',
+  studio: 'Studio',
+  villa: 'Villa',
+}
+export const AMENITY: Record<string, string> = {
+  ac: 'Máy lạnh',
+  window: 'Cửa sổ',
+  balcony: 'Ban công',
+  bathtub: 'Bồn tắm',
+  kitchen: 'Bếp nhỏ',
+  desk: 'Bàn làm việc',
+}
+export const ROOM_KINDS = Object.values(ROOM_TYPE)
+export const AMENITIES = Object.values(AMENITY)
 // Bookings still ahead (or in house) on a room: they block deleting it and keep their price when it changes.
 export const upcomingOn = (all: Booking[], roomId: number) =>
   all
@@ -349,7 +366,7 @@ const rooms: Room[] = [
     place_id: 1,
     name: 'Sen',
     floor: 2,
-    kind: 'Phòng 2 giường',
+    kind: 'Phòng đôi',
     amenities: ['Máy lạnh', 'Ban công'],
     max_guests: 3,
     price: 600000,

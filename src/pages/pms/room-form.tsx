@@ -28,6 +28,7 @@ import {
   upcomingOn,
   usePms,
 } from '@/modules/pms/pms.store'
+import { deleteRoom, saveRoom } from '@/modules/pms/remote'
 
 const LABELS: Record<keyof RoomDraft, string> = {
   place_id: 'Cơ sở',
@@ -93,7 +94,7 @@ export default function RoomFormPage() {
 
 function Form({ room, placeId, placeName }: { room?: Room; placeId: number; placeName: string }) {
   const navigate = useNavigate()
-  const { rooms, bookings, actions } = usePms()
+  const { rooms, bookings } = usePms()
   const record = useRecord()
   const editing = !!room
   const mine = rooms.filter((r) => r.place_id === placeId)
@@ -116,7 +117,7 @@ function Form({ room, placeId, placeName }: { room?: Room; placeId: number; plac
   const [tried, setTried] = useState(false)
   const [discard, setDiscard] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
-  const [saved, setSaved] = useState<{ name: string; changes: number }>()
+  const [saved, setSaved] = useState<{ name: string; changes: number; notices?: string[] }>()
   const set = (patch: Partial<RoomDraft>) => setF({ ...f, ...patch })
 
   const name = f.name.trim()
@@ -134,11 +135,11 @@ function Form({ room, placeId, placeName }: { room?: Room; placeId: number; plac
   const priceChanged = editing && (changed.includes('price') || changed.includes('weekend_price'))
   const cls = (k: keyof RoomDraft) => editing && changed.includes(k)
 
-  function save() {
+  async function save() {
     if (!name || dup || !(f.price && f.price > 0)) return setTried(true)
-    const result = actions.saveRoom({ ...f, name, weekend_price: f.weekend_price || undefined }, room?.id)
+    const result = await saveRoom({ ...f, name, weekend_price: f.weekend_price || undefined }, room?.id)
     if (typeof result === 'string') return toast(result)
-    setSaved({ name, changes: changed.length })
+    setSaved({ name, changes: changed.length, notices: result.notices })
   }
 
   const close = () => (dirty && !saved ? setDiscard(true) : navigate(-1))
@@ -179,6 +180,11 @@ function Form({ room, placeId, placeName }: { room?: Room; placeId: number; plac
                   : `Phòng ${saved.name} đã có trên lịch và ${f.active ? 'sẵn sàng nhận đặt phòng' : 'đang tạm ngưng'}.`}
               </span>
             </div>
+            {saved.notices?.map((n) => (
+              <div key={n} className="notice" role="status">
+                {n}
+              </div>
+            ))}
             {summary}
             <A className="btn btn-primary btn-block" to="/rooms" replace>
               Về danh sách phòng
@@ -448,7 +454,7 @@ function Form({ room, placeId, placeName }: { room?: Room; placeId: number; plac
             type="button"
             className="btn btn-danger btn-block"
             onClick={async () => {
-              if (await record(() => actions.deleteRoom(room.id), `Đã xoá phòng ${room.name}`)) return
+              if (await record(() => deleteRoom(room.id), `Đã xoá phòng ${room.name}`)) return
               navigate('/rooms', { replace: true })
             }}
           >

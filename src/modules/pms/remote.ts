@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { API_URL } from '@/constants/common'
 
 import { api, ApiError } from './api'
-import { addDays, Booking, day, Feed, PayMethod, Room, usePms } from './pms.store'
+import { addDays, AMENITY, Booking, day, Feed, PayMethod, Room, ROOM_TYPE, RoomDraft, usePms } from './pms.store'
 
 // Booking and front-desk actions for the screens connected to hueni-api (#34, #35, wiki Mini-App-API).
 // With API_URL every action is a request and the server's answer replaces the local copy; without it
@@ -303,4 +303,127 @@ export function useActivity(path?: string, version?: string) {
     page()
   }, [page, version])
   return { lines: path ? lines : [], error, more: next ? () => page(next) : undefined }
+}
+
+// ---------- homestay setup (#22, hueni-api#162): owner-only writes, the API enforces ----------
+
+const message = (e: unknown) => (e instanceof ApiError ? e.message : 'Có lỗi, thử lại sau ít phút.')
+const codeOf = (map: Record<string, string>, label?: string) => Object.keys(map).find((k) => map[k] === label) || null
+
+// Thêm / sửa phòng. notices: what the owner should know (bookings ahead keep their price, too many guests…).
+export async function saveRoom(draft: RoomDraft, id?: number): Promise<{ id: number; notices?: string[] } | string> {
+  if (!API_URL) {
+    const r = usePms.getState().actions.saveRoom(draft, id)
+    return typeof r === 'number' ? { id: r } : r
+  }
+  const room = {
+    name: draft.name,
+    max_guests: draft.max_guests,
+    price: draft.price ?? null,
+    weekend_price: draft.weekend_price ?? null,
+    active: draft.active,
+    floor: draft.floor ?? null,
+    room_type: codeOf(ROOM_TYPE, draft.kind),
+    amenities: (draft.amenities || []).map((a) => codeOf(AMENITY, a)).filter(Boolean),
+    note: draft.note || null,
+  }
+  try {
+    const r = await api<{ id: number; notices?: string[] }>(id ? `/rooms/${id}` : `/places/${draft.place_id}/rooms`, {
+      method: id ? 'PATCH' : 'POST',
+      body: { room },
+    })
+    await loadPlace(draft.place_id).catch(() => {})
+    return { id: r.id, notices: r.notices }
+  } catch (e) {
+    return message(e)
+  }
+}
+
+// Only a room that never had a booking; else the server says to pause it instead.
+export async function deleteRoom(id: number): Promise<Result> {
+  if (!API_URL) return usePms.getState().actions.deleteRoom(id)
+  const placeId = placeOfRoom(id)
+  try {
+    await api(`/rooms/${id}`, { method: 'DELETE' })
+    if (placeId) await loadPlace(placeId).catch(() => {})
+  } catch (e) {
+    return message(e)
+  }
+}
+
+export type Service = { id: number; name: string; price: number; unit?: string }
+
+// Danh mục dịch vụ of a homestay; `mock` without the API.
+export function useServices(placeId: number | undefined, mock: Omit<Service, 'id'>[]) {
+  const [list, setList] = useState<Service[]>(() => mock.map((x, i) => ({ ...x, id: i + 1 })))
+  useEffect(() => {
+    if (!API_URL || !placeId) return
+    api<{ services: Service[] }>(`/places/${placeId}/services`)
+      .then((r) => setList(r.services.map((x) => strip<Service>(x))))
+      .catch(() => setList([]))
+  }, [placeId])
+  return list
+}
+
+// Thêm dịch vụ: one request per service (the server copies name and price onto the bill).
+export async function addCharges(bookingId: number, items: { service_id: number; quantity: number }[]) {
+  for (const item of items) {
+    const error = await send(`/bookings/${bookingId}/charges`, { body: item })
+    if (error) return error
+  }
+}
+
+export const removeCharge = (bookingId: number, chargeId: number) =>
+  send(`/bookings/${bookingId}/charges/${chargeId}`, { method: 'DELETE' })
+
+// "50000" or "10%"; blank removes it. Staff are capped by the server.
+export const setDiscount = (bookingId: number, discount: string, reason = '') =>
+  send(`/bookings/${bookingId}/discount`, {
+    method: 'PATCH',
+    body: { booking: { discount, discount_reason: reason } },
+  })
+
+export const removePayment = (bookingId: number, paymentId: number) =>
+  send(`/bookings/${bookingId}/payments/${paymentId}`, { method: 'DELETE' })
+
+// Thành viên: names to pick from (dọn phòng, giao ca). No phone numbers.
+export function useMembers(placeId: number | undefined, mock: string[]) {
+  const [names, setNames] = useState(mock)
+  useEffect(() => {
+    if (!API_URL || !placeId) return
+    api<{ members: { name: string }[] }>(`/places/${placeId}/members`)
+      .then((r) => setNames(r.members.map((m) => m.name)))
+      .catch(() => {})
+  }, [placeId])
+  return names
+}
+
+// Hoa hồng OTA (owner): % each channel keeps, for Thực nhận in Báo cáo. `mock` without the API.
+export function useCommissions(
+  placeId: number,
+  mock: Record<string, number>,
+  setMock: (k: string, pct: number) => void,
+) {
+  const [server, setServer] = useState<Record<string, number>>({})
+  useEffect(() => {
+    if (!API_URL) return
+    api<{ commissions?: Record<string, number> }>(`/places/${placeId}`)
+      .then((p) => setServer(p.commissions || {}))
+      .catch(() => {})
+  }, [placeId])
+  if (!API_URL) return { commission: mock, save: async (k: string, pct: number) => setMock(k, pct) }
+  return {
+    commission: server as Record<string, number | undefined>,
+    save: async (k: string, pct: number): Promise<Result> => {
+      try {
+        const p = await api<{ commissions?: Record<string, number> }>(`/places/${placeId}/commissions`, {
+          method: 'PATCH',
+          body: { place: { commissions: { [k]: pct || '' } } },
+        })
+        setServer(p.commissions || {})
+      } catch (e) {
+        return message(e)
+      }
+    },
+  }
 }

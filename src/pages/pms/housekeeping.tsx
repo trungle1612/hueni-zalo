@@ -5,7 +5,7 @@ import React, { useState } from 'react'
 import { AppBar, Badge, Field, Screen, Sec, Sheet, toast, useCurrent, useRecord } from '@/modules/pms/components/ui'
 import { CHECKLIST, cleanOf, patchClean, STAFF, useOps } from '@/modules/pms/ops.store'
 import { fmtDate, guestLabel, isStaying, needsCleaning, Room, today, usePms } from '@/modules/pms/pms.store'
-import { remote } from '@/modules/pms/remote'
+import { remote, useMembers } from '@/modules/pms/remote'
 
 type Task = { room: Room; daily: boolean; note: string; urgent: boolean; done: boolean; who: string; started: boolean }
 
@@ -13,7 +13,8 @@ type Task = { room: Room; daily: boolean; note: string; urgent: boolean; done: b
 export default function HousekeepingPage() {
   const { bookings } = usePms()
   const { cleans } = useOps()
-  const { rooms } = useCurrent()
+  const { place, rooms } = useCurrent()
+  const staff = useMembers(place.id, STAFF)
   const record = useRecord()
   const [openId, setOpenId] = useState<number>()
   const [issue, setIssue] = useState('')
@@ -76,7 +77,7 @@ export default function HousekeepingPage() {
   const c = open && cleanOf(cleans, open.room.id)
   const ticked = c ? c.checks.filter(Boolean).length : 0
   const order = (a: Task, b: Task) => Number(a.done) - Number(b.done) || Number(b.urgent) - Number(a.urgent)
-  const groups = ['', ...STAFF]
+  const groups = ['', ...staff]
     .map((who) => ({ who, items: tasks.filter((t) => t.who === who).sort(order) }))
     .filter((g) => g.items.length)
 
@@ -153,7 +154,7 @@ export default function HousekeepingPage() {
             {(p) => (
               <select {...p} value={c.who} onChange={(e) => patchClean(open.room.id, { who: e.target.value })}>
                 <option value="">Chưa giao</option>
-                {STAFF.map((s) => (
+                {staff.map((s) => (
                   <option key={s}>{s}</option>
                 ))}
               </select>
