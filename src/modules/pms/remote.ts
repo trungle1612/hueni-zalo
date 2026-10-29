@@ -1,7 +1,7 @@
 import { API_URL } from '@/constants/common'
 
 import { api, ApiError } from './api'
-import { addDays, Booking, day, PayMethod, Room, usePms } from './pms.store'
+import { addDays, Booking, day, Feed, PayMethod, Room, usePms } from './pms.store'
 
 // Booking and front-desk actions for the screens connected to hueni-api (#34, #35, wiki Mini-App-API).
 // With API_URL every action is a request and the server's answer replaces the local copy; without it
@@ -29,6 +29,26 @@ const toBooking = (b: Booking): Booking => {
   return x.payments ? { ...x, payments: x.payments.map((p) => strip(p)), charges: x.charges?.map((c) => strip(c)) } : x
 }
 
+// GET /places/:id/calendar_feeds: last_synced_at is the last success there; the store's is the last attempt.
+type ApiFeed = Omit<Feed, 'last_synced_at' | 'last_ok_at' | 'last_error'> & {
+  last_synced_at: string | null
+  last_error_at: string | null
+  error: Feed['last_error'] | null
+  error_message: string | null
+}
+const toFeed = (f: ApiFeed): Feed =>
+  strip<Feed>({
+    id: f.id,
+    room_id: f.room_id,
+    provider: f.provider,
+    host: f.host,
+    last_synced_at: [f.last_synced_at, f.last_error_at].filter(Boolean).sort().pop() || null,
+    last_ok_at: f.last_synced_at,
+    last_error: f.error,
+    error_message: f.error_message,
+  })
+const upsertFeed = (f: Feed) => usePms.setState((s) => ({ feeds: s.feeds.map((x) => (x.id === f.id ? f : x)) }))
+
 const upsertBooking = (b: Booking) =>
   usePms.setState((s) => ({
     bookings: s.bookings.some((x) => x.id === b.id)
@@ -42,15 +62,17 @@ const upsertBooking = (b: Booking) =>
 // GET /today and /board if the numbers ever drift from the web.
 export async function loadPlace(placeId: number, from = day(-31)) {
   const to = addDays(from, 62)
-  const [{ rooms }, cal] = await Promise.all([
+  const [{ rooms }, cal, channels] = await Promise.all([
     api<{ rooms: ApiRoom[] }>(`/places/${placeId}/rooms`),
     api<{ bookings: Booking[] }>(`/places/${placeId}/calendar?from=${from}&to=${to}`),
+    api<{ rooms: { feeds: ApiFeed[] }[] }>(`/places/${placeId}/calendar_feeds`),
   ])
   const ids = new Set(rooms.map((r) => r.id))
   const inWindow = (b: Booking) =>
     ids.has(b.room_id) && ((b.start_date < to && b.end_date > from) || (!!b.checked_in_at && !b.checked_out_at))
   usePms.setState((s) => ({
     rooms: [...s.rooms.filter((r) => r.place_id !== placeId), ...rooms.map(toRoom)],
+    feeds: [...s.feeds.filter((f) => !ids.has(f.room_id)), ...channels.rooms.flatMap((r) => r.feeds.map(toFeed))],
     // Keep what a booking page fetched (money) until it fetches again.
     bookings: [
       ...s.bookings.filter((b) => !inWindow(b) && !cal.bookings.some((x) => x.id === b.id)),
@@ -189,6 +211,21 @@ export const remote = {
         ? remote.move(id, draft.room_id)
         : 'Đổi phòng cho đặt phòng chưa đến: làm trên trang quản trị hueni, hoặc huỷ rồi đặt lại.'
     return send(`/bookings/${id}`, { method: 'PATCH', body: { booking: bookingBody(draft) } })
+  },
+
+  // Đồng bộ ngay (#37): waits for the OTA, at most once a minute per feed. A failed sync still updates the feed.
+  sync: async (feedId: number): Promise<Result> => {
+    if (!API_URL) return mock().sync(feedId)
+    try {
+      upsertFeed(toFeed(await api<ApiFeed>(`/calendar_feeds/${feedId}/sync`, { method: 'POST' })))
+      const roomId = usePms.getState().feeds.find((f) => f.id === feedId)?.room_id
+      const placeId = roomId && placeOfRoom(roomId)
+      if (placeId) await loadPlace(placeId).catch(() => {})
+    } catch (e) {
+      if (!(e instanceof ApiError)) return 'Có lỗi, thử lại sau ít phút.'
+      if (e.body.feed) upsertFeed(toFeed(e.body.feed as ApiFeed))
+      return e.message
+    }
   },
 
   clean: async (roomId: number): Promise<Result> => {

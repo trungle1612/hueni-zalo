@@ -96,6 +96,7 @@ export type Feed = {
   last_synced_at?: string
   last_ok_at?: string
   last_error?: 'gone' | 'parse' | 'fetch'
+  error_message?: string // hueni-api's sentence for last_error
 }
 
 export type ActivityKind = 'booking' | 'stay' | 'room' | 'sync' | 'error'
