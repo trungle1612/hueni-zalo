@@ -298,15 +298,14 @@ function GroupView({ group }: { group: Group }) {
     setOwn(group.own.includes(b.id))
   }
 
-  function save() {
+  async function save() {
     if (sheet === 'add') {
       const room = rooms.find((r) => r.id === sel)!
-      const error = record(() => {
+      const error = await record(() => {
         const r = addGroupRooms(group, [room], first)
         if (typeof r === 'string') return r
       }, `Đã thêm phòng ${room.name}`)
       if (!error) setSheet(undefined)
-      else toast(error)
       return
     }
     const b = editing!
@@ -315,17 +314,17 @@ function GroupView({ group }: { group: Group }) {
     })
     if (sel !== undefined) {
       const { id: _id, source: _s, ...draft } = b
-      const error = record(
+      const error = await record(
         () => actions.update(b.id, { ...draft, status: b.status === 'hold' ? 'hold' : 'confirmed', room_id: sel }),
         `Đã đổi sang phòng ${allRooms.find((r) => r.id === sel)?.name}`,
       )
-      if (error) return toast(error)
+      if (error) return
     } else toast(`Đã lưu phòng ${editRoom?.name}`)
     setSheet(undefined)
   }
 
   function checkInAll() {
-    const error = record(
+    record(
       () => {
         for (const b of waiting) {
           const e = actions.checkIn(b.id, b.guests || roomOf(b)?.max_guests)
@@ -334,7 +333,6 @@ function GroupView({ group }: { group: Group }) {
       },
       `Đã nhận ${waiting.length} phòng${docs < guests ? ` · ${guests - docs} khách còn thiếu giấy tờ` : ''}`,
     )
-    if (error) toast(error)
   }
 
   return (
@@ -492,13 +490,12 @@ function GroupView({ group }: { group: Group }) {
             <button
               type="button"
               className="btn btn-danger btn-block"
-              onClick={() => {
-                const error = record(
+              onClick={async () => {
+                const error = await record(
                   () => actions.cancel(editing.id, `Bỏ khỏi đoàn ${group.name}`),
                   `Đã bỏ phòng ${editRoom?.name} khỏi đoàn`,
                 )
-                if (error) toast(error)
-                else setSheet(undefined)
+                if (!error) setSheet(undefined)
               }}
             >
               Bỏ phòng khỏi đoàn

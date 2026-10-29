@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { useLocation, useParams, useSearchParams } from 'react-router-dom'
 import { useNavigate } from 'zmp-ui'
 
+import { API_URL } from '@/constants/common'
 import {
   A,
   AppBar,
@@ -34,6 +35,7 @@ import {
   usePlace,
   usePms,
 } from '@/modules/pms/pms.store'
+import { remote } from '@/modules/pms/remote'
 
 const ORIGINS = ['Trực tiếp', 'Điện thoại / Zalo', 'Facebook', 'Khác']
 const LABELS = {
@@ -100,7 +102,7 @@ function Form({
   const navigate = useNavigate()
   // From Hồ sơ khách: name and phone come as router state, never in the URL.
   const from = (useLocation().state || {}) as { guest_name?: string; guest_phone?: string }
-  const { places, rooms, bookings, actions } = usePms()
+  const { places, rooms, bookings } = usePms()
   const owner = can(
     places.find((p) => p.id === placeId),
     'manage',
@@ -193,7 +195,7 @@ function Form({
       : []
   const match = before[0]?.guest_name !== f.guest_name ? before[0] : undefined
 
-  function save() {
+  async function save() {
     if (invalid) return setTried(true)
     const draft = {
       ...f,
@@ -205,7 +207,7 @@ function Form({
           ? [{ amount: deposit, method: 'cash' as const, at: new Date().toISOString(), deposit: true }]
           : [],
     }
-    const result = editing ? actions.update(editing.id, draft) : actions.create(draft)
+    const result = await (editing ? remote.update(editing.id, draft) : remote.create(draft))
     if (typeof result === 'string') return toast(result)
     setSaved({
       id: editing?.id ?? (result as number),
@@ -242,7 +244,7 @@ function Form({
             ) : (
               <>
                 <div className="ok-box" role="status">
-                  <b>Đã lưu đặt phòng {bookingCode({ id: saved.id })}</b>
+                  <b>Đã lưu đặt phòng {bookingCode(bookings.find((x) => x.id === saved.id) || { id: saved.id })}</b>
                   <span>Lịch phòng đã được cập nhật.</span>
                 </div>
                 <dl className="panel">
@@ -425,7 +427,8 @@ function Form({
                   </div>
                 )}
               </fieldset>
-              {!staying && (
+              {/* Giữ chỗ is gone on the server (hueni-api#127); the mock still has it. */}
+              {!staying && !API_URL && (
                 <div className="field">
                   <span className="lbl">Trạng thái</span>
                   <Segmented

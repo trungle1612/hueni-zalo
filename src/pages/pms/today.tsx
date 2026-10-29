@@ -1,11 +1,12 @@
 import dayjs from 'dayjs'
 import React, { useState } from 'react'
 
-import { needsSheet, StayKind, StaySheet, useStay } from '@/modules/pms/components/stay-sheet'
+import { StayKind, StaySheet, useStartStay } from '@/modules/pms/components/stay-sheet'
 import { A, AppBar, Badge, Icon, PlaceSub, Screen, Sec, todayLine, useCurrent } from '@/modules/pms/components/ui'
 import { undeclaredGuests } from '@/modules/pms/ops.store'
 import {
   arrivalDate,
+  awaitingDeposit,
   Booking,
   canCheckIn,
   conflicts,
@@ -22,7 +23,6 @@ import {
   nights,
   occupies,
   overdueDays,
-  paidOf,
   sourceLabel,
   today,
   usePms,
@@ -34,9 +34,9 @@ const sameDay = (iso?: string) => !!iso && dayjs(iso).isSame(dayjs(), 'day')
 export default function TodayPage() {
   const { bookings, feeds, rooms: allRooms } = usePms()
   const { place, rooms, roomOf } = useCurrent()
-  const stay = useStay()
   const [tomorrow, setTomorrow] = useState(false)
   const [sheet, setSheet] = useState<{ kind: StayKind; id: number }>()
+  const startStay = useStartStay((kind, id) => setSheet({ kind, id }))
 
   const ids = new Set(rooms.map((r) => r.id))
   const mine = bookings.filter((b) => ids.has(b.room_id) && b.status !== 'cancelled')
@@ -95,12 +95,7 @@ export default function TodayPage() {
   const [allTasks, setAllTasks] = useState(false)
   const shownTasks = allTasks ? tasks : tasks.slice(0, 3)
 
-  function act(kind: StayKind, b: Booking) {
-    const room = roomOf(b.room_id)!
-    if (needsSheet(kind, b, room, bookings)) return setSheet({ kind, id: b.id })
-    // A refused tap (e.g. the room still has a guest) opens the sheet, which says why.
-    if (stay(kind, b, room)) setSheet({ kind, id: b.id })
-  }
+  const act = (kind: StayKind, b: Booking) => startStay(kind, b, roomOf(b.room_id)!)
 
   function row(b: Booking, kind: 'in' | 'out') {
     const room = roomOf(b.room_id)!
@@ -113,7 +108,7 @@ export default function TodayPage() {
             b.guests && `${b.guests} khách`,
             b.source === 'ical' ? b.guest_name && sourceLabel(b) : b.origin,
             lateDays(b) > 0 && `trễ ${lateDays(b)} ngày`,
-            b.status === 'hold' ? 'giữ chỗ' : b.source === 'manual' && due > 0 && !paidOf(b, room) && 'chưa cọc',
+            b.status === 'hold' ? 'giữ chỗ' : awaitingDeposit(b, room) && 'chưa cọc',
           ]
         : [overdueDays(b) > 0 ? whenLabel(b) : `Ở từ ${fmtDay(b.start_date)}`, b.guests && `${b.guests} khách`]
     const canAct = !tomorrow && !done && (kind === 'in' ? canCheckIn(b) : isStaying(b))

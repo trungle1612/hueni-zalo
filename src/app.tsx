@@ -4,8 +4,9 @@ import { Route } from 'react-router-dom'
 import { AnimationRoutes, App, SnackbarProvider, ZMPRouter } from 'zmp-ui'
 
 import { api } from './modules/pms/api'
-import { ToastHost } from './modules/pms/components/ui'
+import { toast, ToastHost } from './modules/pms/components/ui'
 import { Session, usePms } from './modules/pms/pms.store'
+import { load } from './modules/pms/remote'
 import BookingPage from './pages/pms/booking'
 import BookingFormPage from './pages/pms/booking-form'
 import BookingSitePage from './pages/pms/booking-site'
@@ -43,14 +44,26 @@ function refreshMe() {
   api<Omit<Session, 'token'>>('/me')
     .then((me) => {
       const now = usePms.getState().token // may have been renewed meanwhile
-      if (me.places.length) actions.signIn({ ...me, token: now })
-      else actions.signOut()
+      if (!me.places.length) return actions.signOut()
+      actions.signIn({ ...me, token: now })
+      reload()
     })
     .catch(() => {})
 }
 
+// Rooms and bookings of every homestay; again whenever the app comes back to the front.
+const reload = () => load().then((error) => error && toast(error))
+
 const MyApp = () => {
+  const token = usePms((s) => s.token)
   useEffect(refreshMe, [])
+  useEffect(() => {
+    if (!token) return
+    reload()
+    const onShow = () => document.visibilityState === 'visible' && reload()
+    document.addEventListener('visibilitychange', onShow)
+    return () => document.removeEventListener('visibilitychange', onShow)
+  }, [token])
   return (
     <App>
       <Suspense>

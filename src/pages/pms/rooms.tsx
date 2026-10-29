@@ -34,6 +34,7 @@ import {
   usePms,
   whenLabel,
 } from '@/modules/pms/pms.store'
+import { remote } from '@/modules/pms/remote'
 
 type Status = 'in' | 'clean' | 'ready' | 'maint'
 const META: Record<Status, [string, Tone]> = {
@@ -71,7 +72,6 @@ export default function RoomsPage() {
   const { bookings, feeds, rooms: allRooms } = usePms()
   const { place, rooms } = useCurrent()
   const record = useRecord()
-  const actions = usePms((s) => s.actions)
   const [query, setQuery] = useState('')
   const [sheet, setSheet] = useState<number>()
   const filter = (params.get('f') as 'all' | Status) || 'all'
@@ -194,7 +194,7 @@ export default function RoomsPage() {
                         className="btn"
                         aria-label={`Đánh dấu phòng ${d.room.name} đã dọn xong`}
                         onClick={() =>
-                          record(() => actions.clean(d.room.id), `Phòng ${d.room.name} đã dọn, sẵn sàng đón khách`)
+                          record(() => remote.clean(d.room.id), `Phòng ${d.room.name} đã dọn, sẵn sàng đón khách`)
                         }
                       >
                         Đã dọn
@@ -249,7 +249,6 @@ function RoomSheet({
   onClose: () => void
 }) {
   const navigate = useNavigate()
-  const actions = usePms((s) => s.actions)
   const record = useRecord()
   const room: Room = d.room
   const owner = can(usePlaceOf(room.id), 'manage')
@@ -263,15 +262,15 @@ function RoomSheet({
   const current = status === 'maint' ? 'off' : status === 'clean' ? 'dirty' : 'ready'
   const guest = d.booking || d.next
 
-  function save() {
+  async function save() {
     if (!sel) return
     if (sel === 'off' && !reason.trim()) return setTried(true)
     const label = { ready: 'sẵn sàng', dirty: 'cần dọn', off: 'bảo trì' }[sel]
-    record(
-      () => actions.setRoomStatus(room.id, sel, sel === 'off' ? { reason: reason.trim(), until } : undefined),
+    const error = await record(
+      () => remote.setRoomStatus(room.id, sel, sel === 'off' ? { reason: reason.trim(), until } : undefined),
       `Phòng ${room.name}: ${label}`,
     )
-    onClose()
+    if (!error) onClose()
   }
 
   return (

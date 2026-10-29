@@ -3,6 +3,7 @@ import { Navigate } from 'react-router-dom'
 import { Page, useNavigate } from 'zmp-ui'
 import { create } from 'zustand'
 
+import { API_URL } from '@/constants/common'
 import { clsx } from '@/utils/clsx'
 
 import { Booking, fmtDay, isStaying, placeRooms, today, usePlace, usePms } from '../pms.store'
@@ -365,17 +366,20 @@ export function toast(text: string, undo?: () => void) {
   hideLater()
 }
 
-// Record an action with Hoàn tác: snapshot first, run it, toast on success. Returns the error, if any.
+// Record an action: run it, toast on success. Returns the error, if any; a sheet shows it, else the toast does.
+// Mock data: Hoàn tác puts the snapshot back. hueni-api: no Hoàn tác here (the owner undoes check-in /
+// check-out on the booking page), a refused action toasts the server's sentence.
 export function useRecord() {
   const actions = usePms((s) => s.actions)
-  return (run: () => string | void, text: string) => {
-    const snap = actions.snapshot()
-    const error = run()
+  return async (run: () => string | void | Promise<string | void>, text: string) => {
+    const snap = API_URL ? undefined : actions.snapshot()
+    const error = await run()
     if (error) {
-      actions.restore(snap)
+      if (snap) actions.restore(snap)
+      toast(error)
       return error
     }
-    toast(text, () => actions.restore(snap))
+    toast(text, snap && (() => actions.restore(snap)))
   }
 }
 

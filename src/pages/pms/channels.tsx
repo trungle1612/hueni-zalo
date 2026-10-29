@@ -202,10 +202,10 @@ export default function ChannelsPage() {
           ota={clash.ota}
           manual={clash.manual}
           onClose={() => setFixing(false)}
-          onMove={(roomId, name) => {
+          onMove={async (roomId, name) => {
             const m = clash.manual
             const { id: _id, source: _s, ...draft } = m
-            const error = record(
+            const error = await record(
               () =>
                 isStaying(m)
                   ? actions.move(m.id, roomId)
@@ -216,8 +216,7 @@ export default function ChannelsPage() {
                     }),
               `Đã chuyển ${guestLabel(m)} sang phòng ${name}`,
             )
-            if (error) toast(error)
-            else setFixing(false)
+            if (!error) setFixing(false)
           }}
         />
       )}

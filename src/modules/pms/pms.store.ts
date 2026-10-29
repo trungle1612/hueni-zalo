@@ -1,6 +1,8 @@
 import dayjs from 'dayjs'
 import { create } from 'zustand'
 
+import { API_URL } from '@/constants/common'
+
 // Shapes mirror hueni-api db/schema.rb. Dates are 'YYYY-MM-DD'; end_date is exclusive (checkout day is free).
 // ponytail: in-memory mock data + client-side copies of the API rules, so the UI can be built first.
 // Swap each action for a request() call once hueni-api exposes JSON endpoints (#1); the server stays the source of truth.
@@ -29,9 +31,18 @@ export type Provider = 'airbnb' | 'booking' | 'agoda' | 'other'
 
 export type PayMethod = 'cash' | 'bank' | 'card'
 // amount < 0 = a refund
-export type Payment = { amount: number; method: PayMethod; at: string; deposit?: boolean; by?: string }
+export type Payment = {
+  id?: number
+  amount: number
+  method: PayMethod
+  at: string
+  kind?: 'payment' | 'refund'
+  note?: string
+  deposit?: boolean
+  by?: string
+}
 // A service added to the bill (Phiếu tính tiền): unit price × qty.
-export type Charge = { id: number; name: string; unit: string; price: number; qty: number; at: string }
+export type Charge = { id: number; name: string; unit: string; price: number; qty: number; at: string; amount?: number }
 // One guest's papers for lưu trú: only what the declaration needs, never the photo.
 export type GuestDoc = {
   name: string
@@ -66,6 +77,15 @@ export type Booking = {
   checked_out_at?: string
   declared_at?: string
   removed_from_feed_at?: string
+  // From hueni-api: code and label on every booking; the money only on a Booking detail (GET /bookings/:id).
+  code?: string
+  label?: string
+  cancel_reason?: string
+  awaiting_deposit?: boolean
+  room_total?: number
+  total?: number
+  paid?: number
+  due?: number
 }
 
 export type Feed = {
@@ -128,7 +148,7 @@ export const sourceLabel = (b: Booking) => (b.source === 'manual' ? 'Trực ti�
 export const guestLabel = (b: Booking) => b.guest_name || b.note || (b.source === 'ical' ? sourceLabel(b) : 'Khách')
 export const isStaying = (b: Booking) => !!b.checked_in_at && !b.checked_out_at
 const isBlocking = (b: Booking) => b.status !== 'cancelled'
-export const bookingCode = (b: Pick<Booking, 'id'>) => `DP-${String(b.id).padStart(4, '0')}`
+export const bookingCode = (b: Pick<Booking, 'id' | 'code'>) => b.code || `DP-${String(b.id).padStart(4, '0')}`
 export const money = (n: number) => `${n < 0 ? '−' : ''}${String(Math.abs(n)).replace(/\B(?=(\d{3})+(?!\d))/g, '.')}đ`
 export const inMaintenance = (r: Room, from = today()) => !!r.maintenance && from < r.maintenance.until
 // One definition for every screen: rooms that take guests tonight, and rooms that need cleaning (guest in or not).
@@ -146,16 +166,23 @@ export const priceOn = (b: Booking, room: Room | undefined, date: string) => {
 }
 const nightDates = (b: Pick<Booking, 'start_date' | 'end_date'>) =>
   Array.from({ length: Math.max(0, nights(b)) }, (_, i) => fmt(dayjs(b.start_date).add(i, 'day')))
-export const roomTotalOf = (b: Booking, room?: Room) => nightDates(b).reduce((n, d) => n + priceOn(b, room, d), 0)
+// With hueni-api the server does the money: a Booking detail (it has `payments`) carries it; a list booking has
+// none, so it shows no amount owed (open the booking for that).
+const detail = (b: Booking) => !!API_URL && !!b.payments
+export const roomTotalOf = (b: Booking, room?: Room) =>
+  detail(b) ? b.room_total || 0 : nightDates(b).reduce((n, d) => n + priceOn(b, room, d), 0)
 export const chargesOf = (b: Booking) => (b.charges || []).reduce((n, c) => n + c.price * c.qty, 0)
 export const totalOf = (b: Booking, room?: Room) =>
-  roomTotalOf(b, room) + (b.source === 'ical' ? 0 : chargesOf(b) - (b.discount?.amount || 0))
+  detail(b) ? b.total || 0 : roomTotalOf(b, room) + (b.source === 'ical' ? 0 : chargesOf(b) - (b.discount?.amount || 0))
 export const hasWeekendPrice = (b: Booking, room?: Room) =>
   nightDates(b).some((d) => priceOn(b, room, d) !== nightPrice(b, room))
 export const paidOf = (b: Booking, room?: Room) =>
   b.source === 'ical' ? totalOf(b, room) : (b.payments || []).reduce((n, p) => n + p.amount, 0)
 export const dueOf = (b: Booking, room?: Room) =>
-  b.status === 'cancelled' ? 0 : Math.max(0, totalOf(b, room) - paidOf(b, room))
+  API_URL ? b.due || 0 : b.status === 'cancelled' ? 0 : Math.max(0, totalOf(b, room) - paidOf(b, room))
+// Chưa cọc: a direct booking, not checked in, nothing paid yet.
+export const awaitingDeposit = (b: Booking, room?: Room) =>
+  b.awaiting_deposit ?? (b.source === 'manual' && dueOf(b, room) > 0 && !paidOf(b, room))
 export const PAY_METHOD: Record<PayMethod, string> = { cash: 'Tiền mặt', bank: 'Chuyển khoản', card: 'Thẻ' }
 export const ROOM_KINDS = ['Phòng đôi', 'Phòng 2 giường', 'Phòng gia đình', 'Phòng đơn']
 export const AMENITIES = ['Máy lạnh', 'Cửa sổ', 'Ban công', 'Bồn tắm', 'Bếp nhỏ', 'Bàn làm việc']
@@ -738,11 +765,11 @@ export const usePms = create<State>((set, get) => {
     signedIn: !!saved,
     recent: [],
     places: (saved || MOCK_SESSION).places,
-    // ponytail: rooms, bookings and feeds stay mock until hueni-api has endpoints; real places show no rooms.
-    rooms,
-    bookings,
-    feeds,
-    activities,
+    // With hueni-api, rooms and bookings come from remote.ts load(); feeds and activities stay mock until #37, #38.
+    rooms: API_URL ? [] : rooms,
+    bookings: API_URL ? [] : bookings,
+    feeds: API_URL ? [] : feeds,
+    activities: API_URL ? [] : activities,
     currentSlug: (saved || MOCK_SESSION).places[0].slug,
     actions: {
       signIn: (session = MOCK_SESSION) => {

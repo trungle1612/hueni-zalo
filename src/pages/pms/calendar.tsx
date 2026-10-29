@@ -1,6 +1,7 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { useNavigate } from 'zmp-ui'
 
+import { API_URL } from '@/constants/common'
 import {
   A,
   AppBar,
@@ -18,6 +19,7 @@ import {
 } from '@/modules/pms/components/ui'
 import {
   addDays,
+  awaitingDeposit,
   Booking,
   daysBetween,
   dueOf,
@@ -29,13 +31,13 @@ import {
   nights,
   occupiedUntil,
   occupies,
-  paidOf,
   Room,
   sourceLabel,
   today,
   usePms,
   weekday,
 } from '@/modules/pms/pms.store'
+import { loadPlace, remote } from '@/modules/pms/remote'
 
 type BarTone = 'in' | 'ok' | 'warn' | 'out' | 'maint'
 const CHIP: Record<BarTone, Tone> = { in: 'primary', ok: 'info', warn: 'warning', out: 'neutral', maint: 'neutral' }
@@ -65,9 +67,9 @@ function barOf(b: Booking, room: Room, row: number): Bar {
       ? ['ok', 'Đã trả phòng']
       : b.status === 'hold'
         ? ['warn', 'Giữ chỗ']
-        : b.source === 'manual' && due > 0 && !paidOf(b, room)
+        : awaitingDeposit(b, room)
           ? ['warn', 'Chưa cọc']
-          : due > 0
+          : due > 0 || (API_URL && b.source === 'manual' && b.due === undefined) // a list booking has no money
             ? ['ok', 'Đã cọc']
             : ['ok', 'Đã thanh toán']
   const words = guestLabel(b).split(/\s+/)
@@ -88,7 +90,7 @@ function barOf(b: Booking, room: Room, row: number): Bar {
 export default function CalendarPage() {
   const navigate = useNavigate()
   const bookings = usePms((s) => s.bookings)
-  const { rooms } = useCurrent()
+  const { place, rooms } = useCurrent()
   const [off, setOff] = useState(0)
   const [peek, setPeek] = useState<Bar>()
   const [quick, setQuick] = useState<{ room: Room; date: string; maxN: number }>()
@@ -98,6 +100,10 @@ export default function CalendarPage() {
   const ws = addDays(today(), span * off)
   const we = addDays(ws, span)
   const dates = Array.from({ length: span }, (_, i) => addDays(ws, i))
+  // Weeks beyond the month loaded on start: load around them.
+  useEffect(() => {
+    if (API_URL && Math.abs(daysBetween(today(), ws)) > 21) loadPlace(place.id, addDays(ws, -21)).catch(() => {})
+  }, [place.id, ws])
   const cols = { gridTemplateColumns: `72px repeat(${span}, minmax(0, 1fr))` }
 
   const bars: Bar[] = rooms.flatMap((room, i) => {
@@ -329,7 +335,6 @@ export default function CalendarPage() {
 }
 
 function QuickBook({ room, date, maxN, onClose }: { room: Room; date: string; maxN: number; onClose: () => void }) {
-  const actions = usePms((s) => s.actions)
   const record = useRecord()
   const [name, setName] = useState('')
   const [phone, setPhone] = useState('')
@@ -345,14 +350,14 @@ function QuickBook({ room, date, maxN, onClose }: { room: Room; date: string; ma
   const phoneErr = tried && phoneDigits(phone).length < 9 && PHONE_ERROR
   const depErr = !!deposit && deposit > total && `Tiền cọc không được lớn hơn tổng ${money(total)}.`
 
-  function save() {
+  async function save() {
     if (!name.trim() || phoneDigits(phone).length < 9 || depErr) {
       setTried(true)
       if (depErr) setMore(true)
       return
     }
-    const err = record(() => {
-      const id = actions.create({
+    const err = await record(async () => {
+      const id = await remote.create({
         room_id: room.id,
         start_date: date,
         end_date: addDays(date, n),
