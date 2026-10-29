@@ -1,10 +1,11 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import React, { Suspense, useEffect } from 'react'
-import { Route } from 'react-router-dom'
+import { Navigate, Route } from 'react-router-dom'
 import { AnimationRoutes, App, SnackbarProvider, ZMPRouter } from 'zmp-ui'
 
 import { api } from './modules/pms/api'
 import { toast, ToastHost } from './modules/pms/components/ui'
+import { isLive } from './modules/pms/live'
 import { Session, usePms } from './modules/pms/pms.store'
 import { load } from './modules/pms/remote'
 import BookingPage from './pages/pms/booking'
@@ -54,6 +55,9 @@ function refreshMe() {
 // Rooms and bookings of every homestay; again whenever the app comes back to the front.
 const reload = () => load().then((error) => error && toast(error))
 
+// A screen still on mock data: a direct link lands on Hôm nay (#21).
+const live = (path: string, page: React.ReactElement) => (isLive(path) ? page : <Navigate to="/" replace />)
+
 const MyApp = () => {
   const token = usePms((s) => s.token)
   useEffect(refreshMe, [])
@@ -79,18 +83,18 @@ const MyApp = () => {
                 <Route path="/rooms/:id/edit" element={<RoomFormPage />} />
                 <Route path="/report" element={<ReportPage />} />
                 <Route path="/more" element={<MorePage />} />
-                <Route path="/registration" element={<RegistrationPage />} />
-                <Route path="/shift" element={<ShiftPage />} />
-                <Route path="/housekeeping" element={<HousekeepingPage />} />
-                <Route path="/guests" element={<GuestsPage />} />
-                <Route path="/guests/:id" element={<GuestsPage />} />
-                <Route path="/messages" element={<MessagesPage />} />
-                <Route path="/groups/new" element={<GroupBookingPage />} />
-                <Route path="/groups/:id" element={<GroupBookingPage />} />
+                <Route path="/registration" element={live('/registration', <RegistrationPage />)} />
+                <Route path="/shift" element={live('/shift', <ShiftPage />)} />
+                <Route path="/housekeeping" element={live('/housekeeping', <HousekeepingPage />)} />
+                <Route path="/guests" element={live('/guests', <GuestsPage />)} />
+                <Route path="/guests/:id" element={live('/guests/:id', <GuestsPage />)} />
+                <Route path="/messages" element={live('/messages', <MessagesPage />)} />
+                <Route path="/groups/new" element={live('/groups/new', <GroupBookingPage />)} />
+                <Route path="/groups/:id" element={live('/groups/:id', <GroupBookingPage />)} />
                 <Route path="/channels" element={<ChannelsPage />} />
-                <Route path="/booking-site" element={<BookingSitePage />} />
-                <Route path="/rates" element={<RatesPage />} />
-                <Route path="/staff" element={<StaffPage />} />
+                <Route path="/booking-site" element={live('/booking-site', <BookingSitePage />)} />
+                <Route path="/rates" element={live('/rates', <RatesPage />)} />
+                <Route path="/staff" element={live('/staff', <StaffPage />)} />
                 <Route path="/search" element={<SearchPage />} />
                 <Route path="/bookings/new" element={<BookingFormPage />} />
                 <Route path="/bookings/:id" element={<BookingPage />} />

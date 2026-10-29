@@ -3,6 +3,7 @@ import React, { useState } from 'react'
 
 import { StayKind, StaySheet, useStartStay } from '@/modules/pms/components/stay-sheet'
 import { A, AppBar, Badge, Icon, PlaceSub, Screen, Sec, todayLine, useCurrent } from '@/modules/pms/components/ui'
+import { isLive } from '@/modules/pms/live'
 import { undeclaredGuests } from '@/modules/pms/ops.store'
 import {
   arrivalDate,
@@ -82,7 +83,7 @@ export default function TodayPage() {
             text: `Phòng ${roomOf(b.room_id)?.name} chưa dọn, ${guestLabel(b)} đến hôm nay.`,
             to: '/rooms?f=clean',
           })),
-        ...(undeclared
+        ...(undeclared && isLive('/registration')
           ? [
               {
                 key: 'decl',

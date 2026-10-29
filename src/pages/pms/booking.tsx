@@ -20,6 +20,7 @@ import {
   Sheet,
   useRecord,
 } from '@/modules/pms/components/ui'
+import { isLive } from '@/modules/pms/live'
 import {
   Booking,
   bookingCode,
@@ -195,9 +196,11 @@ export default function BookingPage() {
                     </a>
                   </>
                 )}
-                <A className="btn btn-sm" to={`/guests/${b.id}`}>
-                  Hồ sơ khách
-                </A>
+                {isLive('/guests') && (
+                  <A className="btn btn-sm" to={`/guests/${b.id}`}>
+                    Hồ sơ khách
+                  </A>
+                )}
               </div>
             )}
           </div>

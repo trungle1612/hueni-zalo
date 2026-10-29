@@ -3,6 +3,7 @@ import { useNavigate } from 'zmp-ui'
 
 import { api } from '@/modules/pms/api'
 import { A, AppBar, Badge, PlaceSub, Screen, Sec, useCurrent } from '@/modules/pms/components/ui'
+import { isLive } from '@/modules/pms/live'
 import { can, failingFeeds, isStaying, needsCleaning, usePms } from '@/modules/pms/pms.store'
 
 type Item = { to: string; title: string; sub: string; badge?: React.ReactNode }
@@ -18,7 +19,7 @@ export default function MorePage() {
   const dirty = rooms.filter(needsCleaning).length
   const failing = failingFeeds(feeds, allRooms, place.id)
 
-  const groups: [string, Item[]][] = [
+  const all: [string, Item[]][] = [
     [
       'Vận hành hằng ngày',
       [
@@ -68,6 +69,11 @@ export default function MorePage() {
         ] as [string, Item[]][])
       : []),
   ]
+
+  // Screens still on mock data are hidden with the API (#21); so is a group left empty.
+  const groups = all
+    .map(([title, items]) => [title, items.filter((it) => isLive(it.to))] as [string, Item[]])
+    .filter(([, items]) => items.length)
 
   return (
     <Screen tab="/more">
