@@ -10,10 +10,10 @@ import {
   AppBar,
   Badge,
   bookingStatus,
+  ContactButtons,
   Field,
   KV,
   MoneyInput,
-  phoneDigits,
   Screen,
   Sec,
   Segmented,
@@ -119,7 +119,6 @@ export default function BookingPage() {
   const log = (API_URL ? history.lines : activities.filter((a) => a.booking_id === b.id))
     .slice()
     .sort((x, y) => x.at.localeCompare(y.at))
-  const phone = phoneDigits(b.guest_phone)
 
   const note =
     b.status === 'cancelled'
@@ -181,21 +180,7 @@ export default function BookingPage() {
             </dl>
             {manual && (
               <div className="actions">
-                {phone && (
-                  <>
-                    <a className="btn btn-sm" href={`tel:${phone}`}>
-                      Gọi
-                    </a>
-                    <a
-                      className="btn btn-sm"
-                      href={`https://zalo.me/${phone}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      Nhắn Zalo
-                    </a>
-                  </>
-                )}
+                <ContactButtons phone={b.guest_phone} />
                 {isLive('/guests') && (
                   <A className="btn btn-sm" to={`/guests/${b.id}`}>
                     Hồ sơ khách
