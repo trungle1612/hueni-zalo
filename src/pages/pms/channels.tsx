@@ -39,7 +39,7 @@ import {
   today,
   usePms,
 } from '@/modules/pms/pms.store'
-import { remote } from '@/modules/pms/remote'
+import { remote, useActivity } from '@/modules/pms/remote'
 import { useSales } from '@/modules/pms/sales.store'
 
 const ago = (iso: string) => dayjs(iso).fromNow()
@@ -66,8 +66,9 @@ export default function ChannelsPage() {
   const errCount = mine.filter((f) => f.last_error).length
   const clash = conflicts(bookings.filter((b) => ids.has(b.room_id)))[0]
   const month = dayjs().format('YYYY-MM')
-  const log = activities
-    .filter((a) => a.place_id === place.id && (a.kind === 'sync' || a.kind === 'error'))
+  const server = useActivity(API_URL && owner ? `/places/${place.id}/activity` : undefined)
+  const log = (API_URL ? server.lines : activities.filter((a) => a.place_id === place.id))
+    .filter((a) => a.kind === 'sync' || a.kind === 'error')
     .sort((a, b) => b.at.localeCompare(a.at))
     .slice(0, 5)
 
@@ -171,7 +172,7 @@ export default function ChannelsPage() {
                       {a.detail && ` · ${a.detail}`}
                     </span>
                     <span className="t2">
-                      Phòng {roomOf(a.room_id)?.name} · {fmtTime(a.at)}
+                      Phòng {a.room_id && roomOf(a.room_id)?.name} · {fmtTime(a.at)}
                     </span>
                   </span>
                 </div>

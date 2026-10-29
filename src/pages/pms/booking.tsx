@@ -3,6 +3,7 @@ import React, { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { useNavigate } from 'zmp-ui'
 
+import { API_URL } from '@/constants/common'
 import { StayKind, StaySheet, useStartStay } from '@/modules/pms/components/stay-sheet'
 import {
   A,
@@ -53,7 +54,7 @@ import {
   usePms,
   whenLabel,
 } from '@/modules/pms/pms.store'
-import { fetchBooking, remote } from '@/modules/pms/remote'
+import { fetchBooking, remote, useActivity } from '@/modules/pms/remote'
 import { GuestFlagNotice } from '@/pages/pms/guests'
 
 const isToday = (iso?: string) => !!iso && dayjs(iso).isSame(dayjs(), 'day')
@@ -75,6 +76,13 @@ export default function BookingPage() {
   const [restoreError, setRestoreError] = useState<string>()
   const [loading, setLoading] = useState(true)
   const startStay = useStartStay((kind) => setSheet(kind))
+  const owner = can(place, 'manage')
+  // Lịch sử is the owner's; with hueni-api it comes from the server, again after each change to the booking.
+  const history = useActivity(
+    API_URL && owner && b ? `/bookings/${b.id}/history` : undefined,
+    b &&
+      [b.status, b.checked_in_at, b.checked_out_at, b.declared_at, b.room_id, b.start_date, b.end_date, b.paid].join(),
+  )
 
   useEffect(() => {
     if (!id) return
@@ -103,12 +111,13 @@ export default function BookingPage() {
     )
   }
 
-  const owner = can(place, 'manage')
   const status = bookingStatus(b)
   const due = dueOf(b, room)
   const paid = paidOf(b, room)
   const manual = b.source === 'manual'
-  const log = activities.filter((a) => a.booking_id === b.id).sort((x, y) => x.at.localeCompare(y.at))
+  const log = (API_URL ? history.lines : activities.filter((a) => a.booking_id === b.id))
+    .slice()
+    .sort((x, y) => x.at.localeCompare(y.at))
   const phone = phoneDigits(b.guest_phone)
 
   const note =
@@ -302,6 +311,11 @@ export default function BookingPage() {
                 </li>
               ))}
             </ol>
+            {history.more && (
+              <button type="button" className="btn btn-block" style={{ marginTop: 8 }} onClick={history.more}>
+                Xem cũ hơn
+              </button>
+            )}
           </Sec>
         )}
 

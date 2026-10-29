@@ -1,3 +1,5 @@
+import { useCallback, useEffect, useState } from 'react'
+
 import { API_URL } from '@/constants/common'
 
 import { api, ApiError } from './api'
@@ -261,4 +263,44 @@ export const remote = {
       return e instanceof ApiError ? e.message : 'Có lỗi, thử lại sau ít phút.'
     }
   },
+}
+
+// Hoạt động / Lịch sử (#38): lines written by the server, newest first, 50 a page. Owners only.
+export type Line = {
+  id: number
+  at: string
+  kind: string
+  action: string
+  detail?: string
+  actor: string
+  room_id?: number
+  room_name?: string
+}
+
+// path: /places/:id/activity or /bookings/:id/history; none = don't ask (mock mode, or not an owner).
+// version: ask again from the first page when it changes (the booking was changed).
+export function useActivity(path?: string, version?: string) {
+  const [lines, setLines] = useState<Line[]>([])
+  const [next, setNext] = useState<number | null>(null)
+  const [error, setError] = useState<string>()
+  const page = useCallback(
+    async (before?: number) => {
+      if (!path) return
+      try {
+        const res = await api<{ activities: Line[]; next_before: number | null }>(
+          before ? `${path}?before=${before}` : path,
+        )
+        setLines((l) => [...(before ? l : []), ...res.activities.map((a) => strip<Line>(a))])
+        setNext(res.next_before)
+        setError(undefined)
+      } catch (e) {
+        setError(e instanceof ApiError ? e.message : 'Không tải được lịch sử.')
+      }
+    },
+    [path],
+  )
+  useEffect(() => {
+    page()
+  }, [page, version])
+  return { lines: path ? lines : [], error, more: next ? () => page(next) : undefined }
 }
