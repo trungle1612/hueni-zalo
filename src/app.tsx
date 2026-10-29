@@ -1,9 +1,11 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import React, { Suspense } from 'react'
+import React, { Suspense, useEffect } from 'react'
 import { Route } from 'react-router-dom'
 import { AnimationRoutes, App, SnackbarProvider, ZMPRouter } from 'zmp-ui'
 
+import { api } from './modules/pms/api'
 import { ToastHost } from './modules/pms/components/ui'
+import { Session, usePms } from './modules/pms/pms.store'
 import BookingPage from './pages/pms/booking'
 import BookingFormPage from './pages/pms/booking-form'
 import BookingSitePage from './pages/pms/booking-site'
@@ -34,7 +36,21 @@ const queryClient = new QueryClient({
   },
 })
 
+// Homestays added or removed on the web since last time. Offline or failing: keep what was stored.
+function refreshMe() {
+  const { token, actions } = usePms.getState()
+  if (!token) return
+  api<Omit<Session, 'token'>>('/me')
+    .then((me) => {
+      const now = usePms.getState().token // may have been renewed meanwhile
+      if (me.places.length) actions.signIn({ ...me, token: now })
+      else actions.signOut()
+    })
+    .catch(() => {})
+}
+
 const MyApp = () => {
+  useEffect(refreshMe, [])
   return (
     <App>
       <Suspense>

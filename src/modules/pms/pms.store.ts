@@ -690,7 +690,7 @@ type State = {
   }
 }
 
-// POST /app/v1/session's answer; without VITE_API_URL a mock one over the mock places.
+// POST /api/v1/session's answer; without VITE_API_URL a mock one over the mock places.
 export type Session = { token: string; expires_at?: string; user: { id?: number; name: string }; places: Place[] }
 const MOCK_SESSION: Session = { token: '', user: { name: 'Chị Hoa' }, places }
 
@@ -751,13 +751,14 @@ export const usePms = create<State>((set, get) => {
         } catch {
           // private mode: signed in for this session only
         }
-        set({
+        set((s) => ({
           signedIn: true,
           token: session.token,
           user: session.user,
           places: session.places,
-          currentSlug: session.places[0].slug,
-        })
+          // Keep the chosen homestay across a quiet re-login or /me refresh.
+          currentSlug: session.places.some((p) => p.slug === s.currentSlug) ? s.currentSlug : session.places[0].slug,
+        }))
       },
       signOut: () => {
         try {
