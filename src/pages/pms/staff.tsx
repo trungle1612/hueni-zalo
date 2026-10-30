@@ -1,42 +1,20 @@
 import './setup.scss'
 
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
+import { openShareSheet } from 'zmp-sdk'
 
 import { API_URL } from '@/constants/common'
-import {
-  AppBar,
-  Badge,
-  Field,
-  phoneDigits,
-  Screen,
-  Sec,
-  Segmented,
-  Sheet,
-  toast,
-  useCurrent,
-} from '@/modules/pms/components/ui'
-import { can, fmtTime, money, usePms } from '@/modules/pms/pms.store'
-import { useActivity } from '@/modules/pms/remote'
-import {
-  audit,
-  AuditEntry,
-  AuditKind,
-  Perm,
-  PERMS,
-  ROLE_NAME,
-  Staff,
-  StaffRole,
-  useSetup,
-} from '@/modules/pms/setup.store'
+import { AppBar, Badge, Field, Screen, Sec, Segmented, Sheet, toast, useCurrent } from '@/modules/pms/components/ui'
+import { can, fmtTime, money, PAY_METHOD, Role, usePms } from '@/modules/pms/pms.store'
+import { loadStaff, staffRemote, useActivity } from '@/modules/pms/remote'
+import { AuditEntry, AuditKind, PERMS, RefundRequest, ROLE_NAME, Staff, useSetup } from '@/modules/pms/setup.store'
 
 import { Denied } from './rates'
 
-const ROLES: [Exclude<StaffRole, 'owner'>, string][] = [
-  ['mgr', 'Quản lý'],
-  ['fd', 'Lễ tân'],
-  ['hk', 'Buồng phòng'],
+const ROLES: [Role, string][] = [
+  ['staff', ROLE_NAME.staff],
+  ['owner', ROLE_NAME.owner],
 ]
-const MAX_ACCOUNTS = 8
 
 // People's actions from the booking log, sorted into the owner's filters. OTA sync lines are not people.
 const kindOf = (action: string): AuditKind =>
@@ -48,26 +26,27 @@ const kindOf = (action: string): AuditKind =>
         ? 'price'
         : 'other'
 
+// Members and Chờ duyệt: hueni-api's with API_URL (#28, hueni-api#168), the mock in useSetup without.
 export default function StaffPage() {
   const { place } = useCurrent()
+  const owner = can(place, 'manage')
   const [tab, setTab] = useState<'staff' | 'log'>('staff')
-  const req = useSetup((s) => s.refundRequest)
+  const requests = useSetup((s) => s.refundRequests)
 
-  if (!can(place, 'manage')) return <Denied />
+  useEffect(() => {
+    if (owner) loadStaff(place.id).then((e) => e && toast(e))
+  }, [place.id, owner])
 
-  function settle(ok: boolean) {
-    if (!req) return
-    if (ok)
-      audit({
-        k: 'money',
-        action: `Duyệt hoàn cọc · ${req.booking}`,
-        before: 'Chờ duyệt',
-        after: `Hoàn ${money(req.amount)}`,
-        note: 'Chuyển khoản trả khách',
-        who: usePms.getState().user.name,
-      })
-    useSetup.setState({ refundRequest: undefined })
-    toast(ok ? `Đã duyệt. ${req.who} nhận thông báo để chuyển trả khách.` : 'Đã từ chối. Cọc giữ lại, ghi vào nhật ký.')
+  if (!owner) return <Denied />
+
+  async function settle(r: RefundRequest, ok: boolean) {
+    const error = await staffRemote.decide(r.id, ok)
+    toast(
+      error ||
+        (ok
+          ? `Đã duyệt. Khoản hoàn ${money(r.amount)} được ghi vào ${r.booking.code}.`
+          : 'Đã từ chối. Tiền giữ lại, ghi vào nhật ký.'),
+    )
   }
 
   return (
@@ -82,22 +61,27 @@ export default function StaffPage() {
         </button>
       </div>
       <main className="scroll">
-        {req && (
-          <div className="sec">
+        {requests.map((r) => (
+          <div key={r.id} className="sec">
             <div className="approve" role="region" aria-label="Chờ duyệt">
-              <b>Yêu cầu hoàn cọc {money(req.amount)}</b>
-              <span className="help">{req.text}</span>
+              <b>
+                Xin hoàn {money(r.amount)} · {PAY_METHOD[r.payment_method].toLowerCase()}
+              </b>
+              <span className="help">
+                {r.by} gửi lúc {fmtTime(r.at)} · {r.booking.code} {r.booking.label}, phòng {r.booking.room_name}, đã thu{' '}
+                {money(r.booking.paid)}.{r.note && ` ${r.note}`}
+              </span>
               <div className="actions">
-                <button type="button" className="btn btn-sm" onClick={() => settle(false)}>
+                <button type="button" className="btn btn-sm" onClick={() => settle(r, false)}>
                   Từ chối
                 </button>
-                <button type="button" className="btn btn-sm btn-primary" onClick={() => settle(true)}>
-                  Duyệt hoàn cọc
+                <button type="button" className="btn btn-sm btn-primary" onClick={() => settle(r, true)}>
+                  Duyệt hoàn tiền
                 </button>
               </div>
             </div>
           </div>
-        )}
+        ))}
         {tab === 'staff' ? <People /> : <Log />}
         <div className="end" />
       </main>
@@ -107,18 +91,18 @@ export default function StaffPage() {
 
 function People() {
   const staff = useSetup((s) => s.staff)
+  const me = usePms((s) => s.user.id)
   const [open, setOpen] = useState<Staff>()
   const [inviting, setInviting] = useState(false)
+  const [link, setLink] = useState<{ name: string; url: string }>()
 
   return (
     <Sec
-      title={`${staff.length} / ${MAX_ACCOUNTS} tài khoản`}
+      title={`${staff.length} tài khoản`}
       aside={
-        staff.length < MAX_ACCOUNTS && (
-          <button type="button" className="link" onClick={() => setInviting(true)}>
-            + Mời nhân viên
-          </button>
-        )
+        <button type="button" className="link" onClick={() => setInviting(true)}>
+          + Mời nhân viên
+        </button>
       }
     >
       <div className="panel">
@@ -135,7 +119,14 @@ function People() {
             </span>
             <span className="grow">
               <span className="t1">{p.name}</span>
-              <span className="t2">{p.role === 'owner' ? p.sub : `${ROLE_NAME[p.role]} · ${p.sub}`}</span>
+              <span className="t2">
+                {ROLE_NAME[p.role]}
+                {p.user_id === me
+                  ? ' · bạn'
+                  : p.last_active_at
+                    ? ` · hoạt động ${fmtTime(p.last_active_at)}`
+                    : ' · chưa dùng app'}
+              </span>
             </span>
             {p.locked ? (
               <Badge tone="danger">Đã khoá</Badge>
@@ -145,69 +136,86 @@ function People() {
           </button>
         ))}
       </div>
-      <p className="help" style={{ marginTop: 8 }}>
-        Gói hiện tại cho tối đa {MAX_ACCOUNTS} tài khoản.
-      </p>
-      {open && <PersonSheet p={open} onClose={() => setOpen(undefined)} />}
-      {inviting && <InviteSheet onClose={() => setInviting(false)} />}
+      {open && (
+        <PersonSheet
+          p={open}
+          self={open.user_id === me}
+          onLink={(url) => setLink({ name: open.name, url })}
+          onClose={() => setOpen(undefined)}
+        />
+      )}
+      {inviting && <InviteSheet onLink={(name, url) => setLink({ name, url })} onClose={() => setInviting(false)} />}
+      {link && <LinkSheet {...link} onClose={() => setLink(undefined)} />}
     </Sec>
   )
 }
 
-function PersonSheet({ p, onClose }: { p: Staff; onClose: () => void }) {
-  const [role, setRole] = useState(p.role)
-  const [perms, setPerms] = useState(p.perms)
-  const [lockAsk, setLockAsk] = useState(false)
-  const patch = (x: Partial<Staff>) =>
-    useSetup.setState((s) => ({ staff: s.staff.map((y) => (y.id === p.id ? { ...y, ...x } : y)) }))
+// Asked once more before doing it.
+const ASK = {
+  lock: (name: string) => `Khoá ngay: ${name} bị đăng xuất trên mọi thiết bị. Dữ liệu và nhật ký giữ nguyên.`,
+  link: (name: string) => `Link cũ và mọi lần đăng nhập của ${name} bị huỷ. Gửi link mới để ${name} liên kết Zalo lại.`,
+  remove: (name: string) => `${name} không vào được cơ sở này nữa. Nhật ký giữ nguyên.`,
+}
 
-  if (p.role === 'owner')
+function PersonSheet({
+  p,
+  self,
+  onLink,
+  onClose,
+}: {
+  p: Staff
+  self: boolean
+  onLink: (url: string) => void
+  onClose: () => void
+}) {
+  const [role, setRole] = useState(p.role)
+  const [perms, setPerms] = useState(p.permissions)
+  const [ask, setAsk] = useState<keyof typeof ASK>()
+
+  if (self)
     return (
       <Sheet title={p.name} onClose={onClose}>
-        <div className="notice info">Bạn là chủ cơ sở. Chuyển quyền chủ cần xác nhận bằng mã gửi qua Zalo.</div>
+        <div className="notice info">Đây là tài khoản của bạn. Chủ cơ sở có mọi quyền.</div>
         <button type="button" className="btn btn-ghost btn-block" onClick={onClose}>
           Đóng
         </button>
       </Sheet>
     )
 
-  function lock() {
-    if (p.locked) {
-      patch({ locked: false })
-      onClose()
-      return toast(`Đã mở khoá ${p.name}`)
-    }
-    if (!lockAsk) return setLockAsk(true)
-    patch({ locked: true })
-    audit({ k: 'other', action: `Khoá tài khoản ${p.name}`, who: usePms.getState().user.name })
+  function done(error: string | void, text: string) {
+    toast(error || text)
+    if (!error) onClose()
+  }
+
+  async function confirm(k: keyof typeof ASK) {
+    if (ask !== k) return setAsk(k)
+    if (k === 'lock') return done(await staffRemote.lock(p.id, true), `Đã khoá ${p.name}`)
+    if (k === 'remove') return done(await staffRemote.remove(p.id), `Đã xoá ${p.name} khỏi cơ sở`)
+    const r = await staffRemote.setupLink(p.id)
+    if (typeof r === 'string') return toast(r)
     onClose()
-    toast(`Đã khoá ${p.name}`)
+    if (r.setup_link) onLink(r.setup_link)
   }
 
   return (
     <Sheet title={p.name} onClose={onClose}>
       <div className="field">
         <span className="lbl">Vai trò</span>
-        <Segmented label="Vai trò" value={role as (typeof ROLES)[number][0]} options={ROLES} onChange={setRole} />
+        <Segmented label="Vai trò" value={role} options={ROLES} onChange={setRole} />
       </div>
       <div className="field">
         <span className="lbl">Quyền thêm</span>
         <div className="panel">
           {PERMS.map(([k, label, sub]) => {
-            const forced = role === 'mgr' && k !== 'rate'
-            const blocked = role === 'hk'
-            const on = forced || (!blocked && !!perms[k])
+            const forced = role === 'owner'
+            const on = forced || perms.includes(k)
             return (
               <div key={k} className="switch-row perm">
                 <div>
                   <div style={{ fontWeight: 600 }} id={`perm-${k}`}>
                     {label}
                   </div>
-                  {(blocked || forced || sub) && (
-                    <p className="help">
-                      {blocked ? 'Buồng phòng không có quyền này' : forced ? 'Có sẵn với Quản lý' : sub}
-                    </p>
-                  )}
+                  {(forced || sub) && <p className="help">{forced ? 'Chủ cơ sở có mọi quyền' : sub}</p>}
                 </div>
                 <button
                   type="button"
@@ -215,8 +223,8 @@ function PersonSheet({ p, onClose }: { p: Staff; onClose: () => void }) {
                   role="switch"
                   aria-checked={on}
                   aria-labelledby={`perm-${k}`}
-                  disabled={forced || blocked}
-                  onClick={() => setPerms({ ...perms, [k as Perm]: !perms[k] })}
+                  disabled={forced}
+                  onClick={() => setPerms(on ? perms.filter((x) => x !== k) : [...perms, k])}
                 >
                   <span />
                 </button>
@@ -228,21 +236,40 @@ function PersonSheet({ p, onClose }: { p: Staff; onClose: () => void }) {
       <button
         type="button"
         className="btn btn-primary btn-block"
-        onClick={() => {
-          patch({ role, perms })
-          onClose()
-          toast(`Đã lưu quyền của ${p.name}. Áp dụng từ lần mở app tiếp theo.`)
-        }}
+        onClick={async () =>
+          done(
+            await staffRemote.save(p.id, { role, permissions: perms }),
+            `Đã lưu quyền của ${p.name}. Áp dụng từ lần mở app tiếp theo.`,
+          )
+        }
       >
         Lưu
       </button>
-      {lockAsk && (
+      {ask && (
         <div className="alert" role="alert">
-          Khoá ngay: {p.name} bị đăng xuất trên mọi thiết bị. Dữ liệu và nhật ký giữ nguyên.
+          {ASK[ask](p.name)}
         </div>
       )}
-      <button type="button" className="btn btn-danger btn-block" onClick={lock}>
-        {p.locked ? 'Mở khoá tài khoản' : lockAsk ? 'Xác nhận khoá' : 'Khoá tài khoản'}
+      {p.locked ? (
+        <button
+          type="button"
+          className="btn btn-block"
+          onClick={async () => done(await staffRemote.lock(p.id, false), `Đã mở khoá ${p.name}`)}
+        >
+          Mở khoá tài khoản
+        </button>
+      ) : (
+        p.role !== 'owner' && (
+          <button type="button" className="btn btn-danger btn-block" onClick={() => confirm('lock')}>
+            {ask === 'lock' ? 'Xác nhận khoá' : 'Khoá tài khoản'}
+          </button>
+        )
+      )}
+      <button type="button" className="btn btn-block" onClick={() => confirm('link')}>
+        {ask === 'link' ? 'Xác nhận tạo link mới' : 'Tạo link đăng nhập mới'}
+      </button>
+      <button type="button" className="btn btn-danger btn-block" onClick={() => confirm('remove')}>
+        {ask === 'remove' ? 'Xác nhận xoá' : 'Xoá khỏi cơ sở'}
       </button>
       <button type="button" className="btn btn-ghost btn-block" onClick={onClose}>
         Đóng
@@ -251,43 +278,29 @@ function PersonSheet({ p, onClose }: { p: Staff; onClose: () => void }) {
   )
 }
 
-function InviteSheet({ onClose }: { onClose: () => void }) {
-  const staff = useSetup((s) => s.staff)
+function InviteSheet({ onLink, onClose }: { onLink: (name: string, url: string) => void; onClose: () => void }) {
+  const { place } = useCurrent()
+  const [name, setName] = useState('')
   const [phone, setPhone] = useState('')
-  const [role, setRole] = useState<(typeof ROLES)[number][0]>('fd')
-  const [tried, setTried] = useState(false)
-  const d = phoneDigits(phone)
-  const exists = staff.some((s) => s.phone === d)
-  const error =
-    tried &&
-    (exists
-      ? 'Số này đã là tài khoản của cơ sở.'
-      : !/^0\d{9}$/.test(d) && 'Số điện thoại gồm 10 chữ số, bắt đầu bằng 0.')
+  const [role, setRole] = useState<Role>('staff')
+  const [error, setError] = useState<string>()
 
-  // ponytail: mock invite; the real one is sent by hueni-api as a Zalo message.
-  function send() {
-    if (exists || !/^0\d{9}$/.test(d)) return setTried(true)
-    useSetup.setState((s) => ({
-      staff: [
-        ...s.staff,
-        {
-          id: Math.max(...s.staff.map((x) => x.id)) + 1,
-          name: d.replace(/(\d{4})(\d{3})(\d{3})/, '$1 $2 $3'),
-          phone: d,
-          role,
-          sub: 'Mời hôm nay · chưa nhận',
-          perms: {},
-          invited: true,
-        },
-      ],
-    }))
+  async function send() {
+    const r = await staffRemote.invite(place.id, {
+      name: name.trim(),
+      phone_number: phone.replace(/[^\d+]/g, ''),
+      role,
+    })
+    if (typeof r === 'string') return setError(r)
     onClose()
-    toast('Đã gửi lời mời qua Zalo')
+    toast(`Đã thêm ${name.trim()}`)
+    if (r.setup_link) onLink(name.trim(), r.setup_link)
   }
 
   return (
     <Sheet title="Mời nhân viên" onClose={onClose}>
-      <Field label="Số điện thoại" error={error}>
+      <Field label="Tên">{(p) => <input {...p} value={name} onChange={(e) => setName(e.target.value)} />}</Field>
+      <Field label="Số điện thoại">
         {(p) => (
           <input
             {...p}
@@ -303,9 +316,48 @@ function InviteSheet({ onClose }: { onClose: () => void }) {
         <span className="lbl">Vai trò</span>
         <Segmented label="Vai trò" value={role} options={ROLES} onChange={setRole} />
       </div>
-      <p className="help">Nhân viên nhận lời mời qua Zalo, mở mini app là dùng được. Lời mời hết hạn sau 48 giờ.</p>
-      <button type="button" className="btn btn-primary btn-block" disabled={!d} onClick={send}>
-        Gửi lời mời
+      <p className="help">Sau khi thêm, gửi link qua Zalo cho người này. Link dùng một lần, hết hạn sau 7 ngày.</p>
+      {error && (
+        <div className="alert" role="alert">
+          {error}
+        </div>
+      )}
+      <button type="button" className="btn btn-primary btn-block" disabled={!name.trim() || !phone} onClick={send}>
+        Thêm nhân viên
+      </button>
+      <button type="button" className="btn btn-ghost btn-block" onClick={onClose}>
+        Đóng
+      </button>
+    </Sheet>
+  )
+}
+
+// The one-time link is a credential: shown only here to the owner, never logged or put in a URL of ours.
+function LinkSheet({ name, url, onClose }: { name: string; url: string; onClose: () => void }) {
+  const copy = () =>
+    navigator.clipboard
+      .writeText(url)
+      .then(() => toast('Đã sao chép link'))
+      .catch(() => toast('Không sao chép được. Giữ lâu vào ô link để chép.'))
+
+  return (
+    <Sheet title={`Gửi link cho ${name}`} onClose={onClose}>
+      <p className="help">
+        {name} mở link để liên kết Zalo, rồi đăng nhập mini app bằng Zalo. Link dùng một lần, hết hạn sau 7 ngày. Chỉ
+        gửi cho đúng người.
+      </p>
+      <Field label="Link đăng nhập">
+        {(p) => <input {...p} readOnly value={url} onFocus={(e) => e.target.select()} />}
+      </Field>
+      <button
+        type="button"
+        className="btn btn-primary btn-block"
+        onClick={() => openShareSheet({ type: 'link', data: { link: url, chatOnly: true } }).catch(copy)}
+      >
+        Gửi qua Zalo
+      </button>
+      <button type="button" className="btn btn-block" onClick={copy}>
+        Sao chép link
       </button>
       <button type="button" className="btn btn-ghost btn-block" onClick={onClose}>
         Đóng
@@ -324,10 +376,11 @@ const FILTERS: [AuditKind | 'all', string][] = [
 function Log() {
   const { activities, rooms } = usePms()
   const { place } = useCurrent()
-  const extra = useSetup((s) => s.audit)
+  const audit = useSetup((s) => s.audit)
   const [filter, setFilter] = useState<AuditKind | 'all'>('all')
   const roomName = (id?: number) => rooms.find((r) => r.id === id)?.name
-  // Hoạt động (#38): with hueni-api, the server's lines; the price/role audit (extra) stays mock until #28.
+  // Hoạt động (#38): with hueni-api, the server's lines (staff changes and refund decisions included, #28);
+  // the mock's price audit only without it.
   const server = useActivity(API_URL ? `/places/${place.id}/activity` : undefined)
 
   const all: AuditEntry[] = [
@@ -341,7 +394,7 @@ function Log() {
         who: a.actor,
         at: a.at,
       })),
-    ...extra,
+    ...(API_URL ? [] : audit),
   ]
   const list = all.filter((l) => filter === 'all' || l.k === filter).sort((a, b) => b.at.localeCompare(a.at))
 

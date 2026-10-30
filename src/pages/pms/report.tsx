@@ -8,9 +8,9 @@ import { api, ApiError } from '@/modules/pms/api'
 import { A, AppBar, PlaceSub, Screen, Sec, Sheet, toast, useCurrent } from '@/modules/pms/components/ui'
 import {
   addDays,
+  allows,
   Booking,
   bookingCode,
-  can,
   daysBetween,
   dueOf,
   fmtDate,
@@ -133,7 +133,7 @@ export default function ReportPage() {
   const [sel, setSel] = useState<number>()
   const [exporting, setExporting] = useState(false)
   const [server, setServer] = useState<ApiReport | string>() // the report, or why it didn't load
-  const owner = can(place, 'manage')
+  const owner = allows(place, 'report') // owners, and staff given Xem báo cáo (#28)
   const p = periods()[period]
   const q = query(p)
 
@@ -157,7 +157,7 @@ export default function ReportPage() {
                 Tài khoản <b style={{ color: 'var(--text)' }}>Lễ tân</b> xem và xử lý được đặt phòng, phòng và thanh
                 toán, nhưng không xem doanh thu.
               </p>
-              <p>Chủ cơ sở có thể cấp quyền trên trang quản trị hueni, mục Nhân viên.</p>
+              <p>Chủ cơ sở có thể cấp quyền ở mục Nhân viên.</p>
               <div style={{ marginTop: 4 }}>
                 <A className="btn" to="/" replace>
                   Về Hôm nay

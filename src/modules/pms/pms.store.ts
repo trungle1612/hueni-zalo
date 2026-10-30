@@ -8,7 +8,9 @@ import { API_URL } from '@/constants/common'
 // Swap each action for a request() call once hueni-api exposes JSON endpoints (#1); the server stays the source of truth.
 
 export type Role = 'owner' | 'staff'
-export type Place = { id: number; slug: string; name: string; role: Role }
+// Quyền thêm of staff at one homestay (hueni-api#168); owners have all three. Missing in sessions saved before.
+export type Perm = 'discount' | 'refund' | 'report'
+export type Place = { id: number; slug: string; name: string; role: Role; permissions?: Perm[] }
 
 export type Room = {
   id: number
@@ -322,7 +324,7 @@ export const STATUS_LABEL: Record<Booking['status'], string> = {
 
 const places: Place[] = [
   { id: 1, slug: 'nha-sen', name: 'Nhà Sen Homestay', role: 'owner' },
-  { id: 2, slug: 'limdim', name: 'Limdim House', role: 'staff' },
+  { id: 2, slug: 'limdim', name: 'Limdim House', role: 'staff', permissions: ['discount'] },
 ]
 
 const rooms: Room[] = [
@@ -1028,6 +1030,9 @@ export const usePms = create<State>((set, get) => {
 
 export const can = (place: Place | undefined, action: 'manage' | 'operate') =>
   !!place && (action === 'operate' || place.role === 'owner')
+// Like hueni-api PlaceMembership#allows?. The UI only hides; the API enforces.
+export const allows = (place: Place | undefined, perm: Perm) =>
+  !!place && (place.role === 'owner' || !!place.permissions?.includes(perm))
 
 export function usePlace(slug?: string) {
   const { places, currentSlug } = usePms()
