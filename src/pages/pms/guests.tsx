@@ -1,8 +1,9 @@
 import dayjs from 'dayjs'
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { useNavigate } from 'zmp-ui'
 
+import { API_URL } from '@/constants/common'
 import {
   A,
   AppBar,
@@ -20,8 +21,9 @@ import {
   useBack,
   useCurrent,
 } from '@/modules/pms/components/ui'
-import { fold, guestKey, logActivity, useGuests } from '@/modules/pms/guests.store'
-import { Booking, bookingCode, dueOf, fmtRange, money, nights, paidOf, totalOf, usePms } from '@/modules/pms/pms.store'
+import { Guest, guestKey, GuestProfile, logActivity, useGuests } from '@/modules/pms/guests.store'
+import { Booking, bookingCode, fmtRange, money, nights, usePms } from '@/modules/pms/pms.store'
+import { fetchGuest, listGuests, saveGuest } from '@/modules/pms/remote'
 
 // Short money for the stat tiles: 4,05tr · 500k.
 const million = (n: number) =>
@@ -39,9 +41,10 @@ export default function GuestsPage() {
   return id ? <Profile bookingId={Number(id)} /> : <GuestList />
 }
 
-// "Cần lưu ý" line for any screen showing this guest's booking.
+// "Cần lưu ý" line for any screen showing this guest's booking: guest_flag from hueni-api, else the mock's.
 export function GuestFlagNotice({ booking }: { booking: Booking }) {
-  const flag = useGuests((s) => s.flags[guestKey(booking)])
+  const mock = useGuests((s) => s.flags[guestKey(booking)])
+  const flag = booking.guest_flag || mock
   if (!flag) return null
   return (
     <div className="sec">
@@ -54,31 +57,32 @@ export function GuestFlagNotice({ booking }: { booking: Booking }) {
 
 function GuestList() {
   const back = useBack('/more')
-  const { bookings } = usePms()
-  const flags = useGuests((s) => s.flags)
-  const { rooms } = useCurrent()
+  const { place } = useCurrent()
   const [query, setQuery] = useState('')
-  const ids = new Set(rooms.map((r) => r.id))
+  const [guests, setGuests] = useState<Guest[]>()
+  const [error, setError] = useState<string>()
 
-  const byKey = new Map<string, Booking[]>()
-  bookings
-    .filter((b) => ids.has(b.room_id) && guestKey(b))
-    .sort((a, b) => b.start_date.localeCompare(a.start_date))
-    .forEach((b) => byKey.set(guestKey(b), [...(byKey.get(guestKey(b)) || []), b]))
-  const q = fold(query)
-  const digits = phoneDigits(query)
-  const guests = Array.from(byKey.entries())
-    .map(([key, list]) => ({
-      key,
-      list,
-      name: list.find((b) => b.guest_name)?.guest_name || 'Khách',
-      stays: list.filter((b) => b.status !== 'cancelled').length,
-    }))
-    .filter(
-      (g) =>
-        !q || fold(g.name).includes(q) || (digits.length >= 3 && phoneDigits(g.list[0].guest_phone).includes(digits)),
+  // The server searches (name with or without accents, phone, DP code); wait for a pause in typing.
+  useEffect(() => {
+    let live = true
+    const t = setTimeout(
+      async () => {
+        const r = await listGuests(place.id, query.trim())
+        if (!live) return
+        if (typeof r === 'string') setError(r)
+        else {
+          setGuests(r)
+          setError(undefined)
+        }
+      },
+      query ? 300 : 0,
     )
-  const back2 = guests.filter((g) => g.stays >= 2).length
+    return () => {
+      live = false
+      clearTimeout(t)
+    }
+  }, [place.id, query])
+  const back2 = (guests || []).filter((g) => g.returning).length
 
   return (
     <Screen>
@@ -111,30 +115,36 @@ function GuestList() {
           title="Hồ sơ khách"
           aside={
             <span className="aside">
-              {guests.length} khách{back2 ? ` · ${back2} quay lại` : ''}
+              {guests?.length ?? 0} khách{back2 ? ` · ${back2} quay lại` : ''}
             </span>
           }
         >
-          {guests.length ? (
+          {error ? (
+            <div className="alert" role="alert">
+              {error}
+            </div>
+          ) : !guests ? (
+            <div className="panel empty-row">Đang tải…</div>
+          ) : guests.length ? (
             <div className="panel">
               {guests.map((g) => (
-                <A key={g.key} className="row" to={`/guests/${g.list[0].id}`}>
+                <A key={g.booking_id} className="row" to={`/guests/${g.booking_id}`}>
                   <span className="grow">
-                    <span className="t1">{g.name}</span>
+                    <span className="t1">{g.name || 'Khách'}</span>
                     <span className="t2">
-                      {g.list[0].guest_phone || 'Chưa có số'} · {g.stays} lần ở · gần nhất {fmtRange(g.list[0])}
+                      {g.phone || 'Chưa có số'} · {g.visits} lần ở · gần nhất {dayjs(g.last_stay).format('DD/MM/YYYY')}
                     </span>
                   </span>
-                  {flags[g.key] ? (
+                  {g.flag ? (
                     <Badge tone="danger">Cần lưu ý</Badge>
                   ) : (
-                    g.stays >= 2 && <Badge tone="primary">Khách quen</Badge>
+                    g.returning && <Badge tone="primary">Khách quen</Badge>
                   )}
                 </A>
               ))}
             </div>
           ) : (
-            <div className="panel empty-row">Không có khách khớp “{query}”.</div>
+            <div className="panel empty-row">{query ? `Không có khách khớp “${query}”.` : 'Chưa có khách.'}</div>
           )}
         </Sec>
         <p className="foot">Khách đặt qua OTA không có hồ sơ: Airbnb và Booking.com không gửi tên, số điện thoại.</p>
@@ -145,36 +155,42 @@ function GuestList() {
 
 function Profile({ bookingId }: { bookingId: number }) {
   const navigate = useNavigate()
-  const { bookings, rooms, user } = usePms()
-  const { notes, flags, papers } = useGuests()
-  const b = bookings.find((x) => x.id === bookingId)
-  const key = b ? guestKey(b) : ''
-  const [note, setNote] = useState(notes[key] || '')
-  const [saved, setSaved] = useState<'Đã lưu' | 'Chưa lưu'>()
+  const { rooms, user } = usePms()
+  const papers = useGuests((s) => s.papers)
+  const [g, setG] = useState<GuestProfile | string>()
+  const [note, setNote] = useState('')
+  const [saved, setSaved] = useState<string>() // Đã lưu · Chưa lưu · the server's error
   const [reveal, setReveal] = useState(false)
   const [flagging, setFlagging] = useState(false)
   const [draft, setDraft] = useState('')
+  const [flagError, setFlagError] = useState<string>()
 
-  if (!b || !key) {
+  useEffect(() => {
+    fetchGuest(bookingId).then((r) => {
+      setG(r)
+      if (typeof r !== 'string') setNote(r.note || '')
+    })
+  }, [bookingId])
+
+  if (typeof g !== 'object') {
     return (
       <Screen>
         <AppBar lead="back" title="Hồ sơ khách" />
         <main className="scroll">
-          <div className="empty">Đặt phòng này không có hồ sơ khách (khách đặt qua OTA hoặc chưa có tên).</div>
+          <div className="empty">{g || 'Đang tải…'}</div>
         </main>
       </Screen>
     )
   }
 
   const roomOf = (id: number) => rooms.find((r) => r.id === id)
-  const mine = bookings.filter((x) => guestKey(x) === key).sort((x, y) => y.start_date.localeCompare(x.start_date))
-  const kept = mine.filter((x) => x.status !== 'cancelled')
-  const name = mine.find((x) => x.guest_name)?.guest_name || 'Khách'
-  const phone = phoneDigits(mine.find((x) => x.guest_phone)?.guest_phone)
-  const first = kept[kept.length - 1] || mine[mine.length - 1]
-  const p = papers[key]
+  const mine = g.bookings
+  const name = g.name || 'Khách'
+  const phone = phoneDigits(g.phone)
+  // ponytail: ID papers are still the mock's; they come from the API with Khai báo lưu trú (#29).
+  const p = API_URL ? undefined : papers[guestKey(mine[0])]
   const paperLabel = p?.nationality === 'Việt Nam' ? 'CCCD' : 'Hộ chiếu'
-  const flag = flags[key]
+  const flag = g.flag
 
   function toggleId() {
     if (!reveal) {
@@ -183,26 +199,30 @@ function Profile({ bookingId }: { bookingId: number }) {
     }
     setReveal(!reveal)
   }
-  function saveNote() {
+  async function saveNote() {
     if (saved !== 'Chưa lưu') return
-    useGuests.setState((s) => ({ notes: { ...s.notes, [key]: note.trim() } }))
+    const r = await saveGuest(bookingId, { note: note.trim() })
+    if (typeof r === 'string') return setSaved(r)
+    setG(r)
     setSaved('Đã lưu')
   }
-  function setFlag(text: string) {
-    useGuests.setState((s) => ({ flags: { ...s.flags, [key]: text } }))
-    logActivity(mine[0], 'booking', text ? 'Đánh dấu khách cần lưu ý' : 'Bỏ đánh dấu khách', name)
+  async function setFlag(text: string) {
+    const r = await saveGuest(bookingId, { flag: text })
+    if (typeof r === 'string') return setFlagError(r)
+    setG(r)
     setFlagging(false)
     toast(text ? 'Đã đánh dấu. Nhân viên sẽ thấy lưu ý khi mở đặt phòng.' : 'Đã bỏ đánh dấu')
   }
 
   return (
     <Screen>
-      <AppBar lead="back" title={name} sub={`Hồ sơ khách · lần đầu ở ${dayjs(first.start_date).format('MM/YYYY')}`}>
+      <AppBar lead="back" title={name} sub={`Hồ sơ khách · lần đầu ở ${dayjs(g.first_stay).format('MM/YYYY')}`}>
         <button
           type="button"
           className="text-btn"
           onClick={() => {
             setDraft('')
+            setFlagError(undefined)
             setFlagging(true)
           }}
         >
@@ -220,19 +240,15 @@ function Profile({ bookingId }: { bookingId: number }) {
         <div className="sec">
           <div className="panel stats">
             <div className="stat">
-              <b>{kept.length}</b>
+              <b>{g.visits}</b>
               <span>Lần ở</span>
             </div>
             <div className="stat">
-              <b>{kept.reduce((n, x) => n + nights(x), 0)}</b>
-              <span>Đêm</span>
-            </div>
-            <div className="stat">
-              <b>{million(mine.reduce((n, x) => n + paidOf(x, roomOf(x.room_id)), 0))}</b>
+              <b>{million(g.paid)}</b>
               <span>Đã trả</span>
             </div>
             <div className="stat">
-              <b>{million(mine.reduce((n, x) => n + dueOf(x, roomOf(x.room_id)), 0))}</b>
+              <b>{million(g.due)}</b>
               <span>Còn nợ</span>
             </div>
           </div>
@@ -257,12 +273,12 @@ function Profile({ bookingId }: { bookingId: number }) {
                   <KV label="Quốc tịch">{p.nationality}</KV>
                 </>
               ) : (
-                <KV label="Giấy tờ">Chưa có · quét khi khai báo lưu trú</KV>
+                !API_URL && <KV label="Giấy tờ">Chưa có · quét khi khai báo lưu trú</KV>
               )}
             </dl>
             {phone && (
               <div className="actions">
-                <ContactButtons phone={mine.find((x) => x.guest_phone)?.guest_phone} />
+                <ContactButtons phone={g.phone} />
               </div>
             )}
           </div>
@@ -274,7 +290,7 @@ function Profile({ bookingId }: { bookingId: number }) {
             {(f) => (
               <textarea
                 {...f}
-                maxLength={300}
+                maxLength={1000}
                 value={note}
                 placeholder="Ví dụ: thích phòng yên tĩnh, đi xe máy"
                 onChange={(e) => {
@@ -292,7 +308,6 @@ function Profile({ bookingId }: { bookingId: number }) {
             {mine.map((x) => {
               const s = bookingStatus(x)
               const room = roomOf(x.room_id)
-              const due = dueOf(x, room)
               return (
                 <A key={x.id} className="row" to={`/bookings/${x.id}`}>
                   <span className="grow">
@@ -300,8 +315,7 @@ function Profile({ bookingId }: { bookingId: number }) {
                       {fmtRange(x)}/{x.end_date.slice(0, 4)} · {room?.name}
                     </span>
                     <span className="t2">
-                      {bookingCode(x)} · {nights(x)} đêm · {money(totalOf(x, room))}
-                      {due > 0 && ` · còn thu ${money(due)}`}
+                      {bookingCode(x)} · {nights(x)} đêm
                     </span>
                   </span>
                   <Badge tone={s.tone}>{s.label}</Badge>
@@ -328,6 +342,11 @@ function Profile({ bookingId }: { bookingId: number }) {
           title={flag ? 'Khách đang được đánh dấu cần lưu ý' : 'Đánh dấu khách cần lưu ý'}
           onClose={() => setFlagging(false)}
         >
+          {flagError && (
+            <div className="alert" role="alert">
+              {flagError}
+            </div>
+          )}
           {flag ? (
             <>
               <p className="help">Lưu ý hiện tại: {flag}</p>

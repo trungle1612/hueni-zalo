@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { API_URL } from '@/constants/common'
 
 import { api, ApiError } from './api'
+import { Guest, GuestProfile, mockGuests, mockProfile } from './guests.store'
 import { addDays, AMENITY, Booking, day, Feed, PayMethod, Room, ROOM_TYPE, RoomDraft, usePms } from './pms.store'
 
 // Booking and front-desk actions for the screens connected to hueni-api (#34, #35, wiki Mini-App-API).
@@ -425,5 +426,51 @@ export function useCommissions(
         return message(e)
       }
     },
+  }
+}
+
+// ---------- khách (#25, hueni-api#165) ----------
+
+const NO_PROFILE = 'Đặt phòng này không có hồ sơ khách (khách đặt qua OTA hoặc chưa có tên).'
+
+// Hồ sơ khách of a homestay. q (name, phone or DP code) goes in the body: guest details never go into a URL.
+export async function listGuests(placeId: number, q: string): Promise<Guest[] | string> {
+  if (!API_URL) return mockGuests(placeId, q)
+  try {
+    const r = await api<{ guests: Guest[] }>(`/places/${placeId}/guests`, { body: { q } })
+    return r.guests.map((g) => strip<Guest>(g))
+  } catch (e) {
+    return message(e)
+  }
+}
+
+const toProfile = (g: GuestProfile): GuestProfile => ({
+  ...strip<GuestProfile>(g),
+  bookings: g.bookings.map(toBooking),
+})
+
+// The profile of the guest of booking `bookingId`.
+export async function fetchGuest(bookingId: number): Promise<GuestProfile | string> {
+  if (!API_URL) return mockProfile(bookingId) || NO_PROFILE
+  try {
+    return toProfile(await api<GuestProfile>(`/bookings/${bookingId}/guest`))
+  } catch (e) {
+    return e instanceof ApiError && e.status === 404 ? NO_PROFILE : message(e)
+  }
+}
+
+// Ghi chú cho lễ tân and Cần lưu ý (flag '' = bỏ đánh dấu). The flag is copied onto the guest's bookings
+// in the store, so Booking detail shows it before its next fetch.
+export async function saveGuest(bookingId: number, guest: { note?: string; flag?: string }) {
+  if (!API_URL) return mockProfile(bookingId, guest) || NO_PROFILE
+  try {
+    const g = toProfile(await api<GuestProfile>(`/bookings/${bookingId}/guest`, { method: 'PATCH', body: { guest } }))
+    const ids = new Set(g.bookings.map((b) => b.id))
+    usePms.setState((s) => ({
+      bookings: s.bookings.map((b) => (ids.has(b.id) ? { ...b, guest_flag: g.flag } : b)),
+    }))
+    return g
+  } catch (e) {
+    return message(e)
   }
 }

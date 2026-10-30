@@ -86,6 +86,7 @@ export type Booking = {
   total?: number
   paid?: number
   due?: number
+  guest_flag?: string // Cần lưu ý of this booking's guest (Hồ sơ khách, hueni-api#165)
 }
 
 export type Feed = {
