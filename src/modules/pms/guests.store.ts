@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 
 import { phoneDigits } from './components/ui'
-import { ActivityKind, Booking, Charge, usePms } from './pms.store'
+import { ActivityKind, Booking, bookingCode, Charge, dueOf, paidOf, usePms } from './pms.store'
 
 // Hồ sơ khách, Phiếu tính tiền extras and Tin nhắn tự động.
 // ponytail: in-memory mock like pms.store; guest profiles, invoices and templates become hueni-api resources later.
@@ -10,6 +10,20 @@ import { ActivityKind, Booking, Charge, usePms } from './pms.store'
 export const fold = (s: string) =>
   s.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').toLowerCase().trim()
 
+// Hồ sơ khách as hueni-api sends it (#165): booking_id (the newest booking) opens the profile.
+export type Guest = {
+  booking_id: number
+  name?: string
+  phone?: string
+  visits: number
+  returning: boolean
+  first_stay: string
+  last_stay: string
+  flag?: string
+}
+export type GuestProfile = Guest & { note?: string; paid: number; due: number; bookings: Booking[] }
+
+// Mock only (`vite dev` without the API); hueni-api groups guests itself.
 // One guest = one phone number; without a phone, the name. OTA bookings carry neither, so they have no profile.
 export const guestKey = (b: Booking) =>
   b.source === 'manual' ? phoneDigits(b.guest_phone) || (b.guest_name ? fold(b.guest_name) : '') : ''
@@ -140,6 +154,66 @@ export function logActivity(b: Booking, kind: ActivityKind, action: string, deta
       },
     ],
   }))
+}
+
+// The mock of POST /places/:id/guests and GET /bookings/:id/guest.
+function mockGuest(key: string, placeId: number): GuestProfile {
+  const { bookings, rooms } = usePms.getState()
+  const roomOf = (id: number) => rooms.find((r) => r.id === id)
+  const mine = bookings
+    .filter((b) => roomOf(b.room_id)?.place_id === placeId && guestKey(b) === key)
+    .sort((a, b) => b.start_date.localeCompare(a.start_date))
+  const visits = mine.filter((b) => b.status !== 'cancelled').length
+  const { notes, flags } = useGuests.getState()
+  return {
+    booking_id: mine[0].id,
+    name: mine[0].guest_name,
+    phone: mine[0].guest_phone,
+    visits,
+    returning: visits >= 2,
+    first_stay: mine[mine.length - 1].start_date,
+    last_stay: mine[0].start_date,
+    flag: flags[key] || undefined,
+    note: notes[key],
+    paid: mine.reduce((n, b) => n + paidOf(b, roomOf(b.room_id)), 0),
+    due: mine.reduce((n, b) => n + dueOf(b, roomOf(b.room_id)), 0),
+    bookings: mine,
+  }
+}
+
+export function mockGuests(placeId: number, q: string): Guest[] {
+  const { bookings, rooms } = usePms.getState()
+  const ids = new Set(rooms.filter((r) => r.place_id === placeId).map((r) => r.id))
+  const f = fold(q)
+  const digits = phoneDigits(q)
+  const keys = new Set(
+    bookings
+      .filter((b) => ids.has(b.room_id) && guestKey(b))
+      .filter(
+        (b) =>
+          !f ||
+          fold(b.guest_name || '').includes(f) ||
+          fold(bookingCode(b)).includes(f) ||
+          (digits.length >= 3 && phoneDigits(b.guest_phone).includes(digits)),
+      )
+      .map(guestKey),
+  )
+  return Array.from(keys, (k) => mockGuest(k, placeId))
+    .sort((a, b) => b.last_stay.localeCompare(a.last_stay))
+    .slice(0, 50)
+}
+
+export function mockProfile(bookingId: number, edit?: { note?: string; flag?: string }) {
+  const { bookings, rooms } = usePms.getState()
+  const b = bookings.find((x) => x.id === bookingId)
+  const key = b && guestKey(b)
+  if (!b || !key) return
+  if (edit?.note !== undefined) useGuests.setState((s) => ({ notes: { ...s.notes, [key]: edit.note! } }))
+  if (edit?.flag !== undefined) {
+    useGuests.setState((s) => ({ flags: { ...s.flags, [key]: edit.flag! } }))
+    logActivity(b, 'booking', edit.flag ? 'Đánh dấu khách cần lưu ý' : 'Bỏ đánh dấu khách', b.guest_name)
+  }
+  return mockGuest(key, rooms.find((r) => r.id === b.room_id)?.place_id ?? 0)
 }
 
 export function patchBooking(id: number, p: Partial<Booking>) {
