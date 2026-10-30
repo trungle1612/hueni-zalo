@@ -25,6 +25,7 @@ export default function HousekeepingPage() {
   const [data, setData] = useState<Housekeeping | string>()
   const [openId, setOpenId] = useState<number>()
   const [issue, setIssue] = useState('')
+  const [busy, setBusy] = useState(false) // a tick is built from the last reply, so wait for it
 
   useEffect(() => {
     fetchHousekeeping(place.id).then(setData)
@@ -35,7 +36,8 @@ export default function HousekeepingPage() {
 
   // Send a write; its answer replaces the room's row. A refusal shows the server's sentence.
   async function run(roomId: number, write: Promise<Cleaning | string>, text?: string, undo?: () => void) {
-    const r = await write
+    setBusy(true)
+    const r = await write.finally(() => setBusy(false))
     if (typeof r === 'string') {
       toast(r)
       return false
@@ -129,7 +131,7 @@ export default function HousekeepingPage() {
                   <select
                     {...p}
                     value={open.task?.assignee_id ?? ''}
-                    disabled={!!open.task?.done_at}
+                    disabled={busy || !!open.task?.done_at}
                     onChange={(e) =>
                       run(open.room_id, cleaning.change(open.room_id, { assignee_id: Number(e.target.value) }))
                     }
@@ -155,7 +157,7 @@ export default function HousekeepingPage() {
                       <input
                         type="checkbox"
                         checked={checks[i]}
-                        disabled={!!open.task?.done_at}
+                        disabled={busy || !!open.task?.done_at}
                         onChange={() =>
                           run(
                             open.room_id,
