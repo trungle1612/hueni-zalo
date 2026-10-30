@@ -4,6 +4,7 @@ import { API_URL } from '@/constants/common'
 
 import { api, ApiError } from './api'
 import { addDays, AMENITY, Booking, day, Feed, PayMethod, Room, ROOM_TYPE, RoomDraft, usePms } from './pms.store'
+import { addGroupRooms, createGroup, Group, useSales } from './sales.store'
 
 // Booking and front-desk actions for the screens connected to hueni-api (#34, #35, wiki Mini-App-API).
 // With API_URL every action is a request and the server's answer replaces the local copy; without it
@@ -426,4 +427,84 @@ export function useCommissions(
       }
     },
   }
+}
+
+// ---------- đoàn (#24, hueni-api#164) ----------
+// Each room is a normal booking with group_id. Every group request answers with the whole Group: keep it in
+// useSales and its rooms (Booking detail, money included) in pms.store. Bỏ phòng khỏi đoàn = remote.cancel.
+
+type ApiGroup = Group & { bookings: Booking[] }
+type Dates = Pick<Booking, 'start_date' | 'end_date'>
+
+async function groupRequest(path: string, method = 'POST', body?: unknown): Promise<number | string> {
+  try {
+    const g = await api<ApiGroup>(path, { method, body })
+    const placeId = g.bookings[0] && placeOfRoom(g.bookings[0].room_id)
+    if (placeId) await loadPlace(placeId).catch(() => {})
+    const { bookings, ...group } = strip<ApiGroup>(g)
+    useSales.setState((s) => ({ groups: [...s.groups.filter((x) => x.id !== g.id), group] }))
+    bookings.forEach((b) => upsertBooking(toBooking(b)))
+    return g.id
+  } catch (e) {
+    return message(e)
+  }
+}
+const groupResult = async (path: string, method?: string, body?: unknown): Promise<Result> => {
+  const r = await groupRequest(path, method, body)
+  if (typeof r === 'string') return r
+}
+
+export const groups = {
+  load: async (id: number): Promise<Result> => (API_URL ? groupResult(`/groups/${id}`, 'GET') : undefined),
+
+  // All rooms or none. discount_pct is the owner's: the server ignores it from staff.
+  create: async (
+    placeId: number,
+    draft: Omit<Group, 'id' | 'code' | 'bill'>,
+    rooms: Room[],
+    dates: Dates,
+  ): Promise<number | string> =>
+    API_URL
+      ? groupRequest(`/places/${placeId}/groups`, 'POST', { group: draft, room_ids: rooms.map((r) => r.id), ...dates })
+      : createGroup(draft, rooms, dates),
+
+  addRoom: async (group: Group, room: Room, dates: Dates): Promise<Result> => {
+    if (API_URL) return groupResult(`/groups/${group.id}/bookings`, 'POST', { room_id: room.id, ...dates })
+    const r = addGroupRooms(group, [room], dates)
+    if (typeof r === 'string') return r
+  },
+
+  // Đổi phòng and / or Tính vào đoàn / Khách tự trả, saved together.
+  setRoom: async (groupId: number, b: Booking, change: { room_id?: number; pays_own?: boolean }): Promise<Result> => {
+    if (API_URL) return groupResult(`/groups/${groupId}/bookings/${b.id}`, 'PATCH', { booking: change })
+    if (change.room_id !== undefined) {
+      const { id: _id, source: _s, ...draft } = b
+      const error = mock().update(b.id, {
+        ...draft,
+        status: b.status === 'hold' ? 'hold' : 'confirmed',
+        room_id: change.room_id,
+      })
+      if (error) return error
+    }
+    if (change.pays_own !== undefined)
+      usePms.setState((s) => ({
+        bookings: s.bookings.map((x) => (x.id === b.id ? { ...x, pays_own: change.pays_own } : x)),
+      }))
+  },
+
+  setBill: async (groupId: number, bill: Group['bill']): Promise<Result> => {
+    if (API_URL) return groupResult(`/groups/${groupId}`, 'PATCH', { group: { bill } })
+    useSales.getState().setGroup(groupId, { bill })
+  },
+
+  // Nhận phòng cả đoàn: every room still to arrive, or none.
+  checkIn: async (groupId: number, waiting: Booking[]): Promise<Result> => {
+    if (API_URL) return groupResult(`/groups/${groupId}/check_in`)
+    const rooms = usePms.getState().rooms
+    for (const b of waiting) {
+      const room = rooms.find((r) => r.id === b.room_id)
+      const e = mock().checkIn(b.id, b.guests || room?.max_guests)
+      if (e) return `Phòng ${room?.name}: ${e}`
+    }
+  },
 }

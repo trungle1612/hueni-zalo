@@ -72,6 +72,7 @@ export type Booking = {
   charges?: Charge[]
   discount?: { amount: number; reason: string }
   group_id?: number // Đặt phòng theo đoàn: one booking per room, one contact
+  pays_own?: boolean // Khách tự trả: left out of the group's bill when it is one bill
   docs?: GuestDoc[]
   checked_in_at?: string
   checked_out_at?: string

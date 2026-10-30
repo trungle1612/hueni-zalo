@@ -6,16 +6,20 @@ import { Channel } from './report'
 // Selling rooms: groups, channel commission, the direct booking page.
 // ponytail: in-memory mock like pms.store; each piece becomes a hueni-api resource.
 
+// hueni-api's Group (#164) without its bookings, which go to pms.store (Khách tự trả = Booking.pays_own).
 export type Group = {
   id: number
-  place_id: number
+  code: string // DOAN-0001, per homestay
   name: string
-  contact: string
+  contact?: string
   phone?: string
-  origin: string
+  origin?: string
   discount_pct: number // giá đoàn: off the room price, fixed into each booking when created
   bill: 'one' | 'split' // one bill for the contact, or one per room
-  own: number[] // booking ids that pay for themselves when bill = 'one'
+  // From hueni-api: sums of the rooms billed to the group.
+  total?: number
+  paid?: number
+  due?: number
 }
 
 export type Site = {
@@ -26,7 +30,6 @@ export type Site = {
   cutoff: string
 }
 
-export const groupCode = (g: Pick<Group, 'id'>) => `DOAN-${String(g.id).padStart(4, '0')}`
 export const GROUP_ORIGINS = ['Công ty lữ hành', 'Điện thoại / Zalo', 'Trực tiếp']
 export const SITE_DEFAULT: Site = { open: true, deposit: 30, hidden: [], hold: '30 phút', cutoff: '20:00' }
 
@@ -84,13 +87,15 @@ export function addGroupRooms(
 }
 
 export function createGroup(
-  draft: Omit<Group, 'id' | 'bill' | 'own'>,
+  draft: Omit<Group, 'id' | 'code' | 'bill'>,
   rooms: Room[],
   dates: Pick<Booking, 'start_date' | 'end_date'>,
 ) {
+  if (rooms.length < 2) return 'Chọn ít nhất 2 phòng. Một phòng thì tạo đặt phòng thường.'
   const id = Math.max(0, ...useSales.getState().groups.map((g) => g.id)) + 1
   const added = addGroupRooms({ ...draft, id }, rooms, dates)
   if (typeof added === 'string') return added
-  useSales.setState((s) => ({ groups: [...s.groups, { ...draft, id, bill: 'one', own: [] }] }))
+  const code = `DOAN-${String(id).padStart(4, '0')}`
+  useSales.setState((s) => ({ groups: [...s.groups, { ...draft, id, code, bill: 'one' }] }))
   return id
 }
