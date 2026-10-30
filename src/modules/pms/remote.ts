@@ -4,6 +4,7 @@ import { API_URL } from '@/constants/common'
 
 import { api, ApiError } from './api'
 import { Guest, GuestProfile, mockGuests, mockProfile } from './guests.store'
+import { mockCleaning, mockHousekeeping } from './ops.store'
 import { addDays, AMENITY, Booking, day, Feed, PayMethod, Room, ROOM_TYPE, RoomDraft, usePms } from './pms.store'
 import { addGroupRooms, createGroup, Group, useSales } from './sales.store'
 
@@ -576,4 +577,85 @@ export async function saveGuest(bookingId: number, guest: { note?: string; flag?
   } catch (e) {
     return message(e)
   }
+}
+
+// ---------- buồng phòng (#26, hueni-api#166) ----------
+
+// One room to clean today. task: null until someone touches it, always null for daily.
+export type Cleaning = {
+  room_id: number
+  room_name: string
+  kind: 'checkout' | 'daily'
+  urgent: boolean
+  damage_note?: string
+  task?: {
+    id: number
+    assignee_id?: number
+    assignee_name?: string
+    checks: boolean[]
+    started_at?: string
+    done_at?: string
+  }
+}
+export type Housekeeping = { checklist: string[]; rows: Cleaning[] }
+
+const toCleaning = (c: Cleaning): Cleaning => {
+  const x = strip<Cleaning>(c)
+  return x.task ? { ...x, task: strip(x.task) } : x
+}
+
+// Which rooms, urgency and order are the server's. Mock: from the store.
+export async function fetchHousekeeping(placeId: number): Promise<Housekeeping | string> {
+  if (!API_URL) return mockHousekeeping(placeId)
+  try {
+    const r = await api<Housekeeping>(`/places/${placeId}/housekeeping`)
+    return { checklist: r.checklist, rows: r.rows.map(toCleaning) }
+  } catch (e) {
+    return message(e)
+  }
+}
+
+// Every write answers with the room's row. Finish and undo change the room, so its homestay reloads.
+async function sendCleaning(roomId: number, path: string, method: string, body?: unknown, reload = false) {
+  try {
+    const row = toCleaning(await api<Cleaning>(path, { method, body }))
+    const placeId = placeOfRoom(roomId)
+    if (reload && placeId) await loadPlace(placeId).catch(() => {})
+    return row
+  } catch (e) {
+    return message(e)
+  }
+}
+
+export const cleaning = {
+  // Người làm, ticks (all 5, in checklist order), Bắt đầu.
+  change: async (roomId: number, p: { assignee_id?: number; checks?: boolean[]; start?: boolean }) =>
+    API_URL
+      ? sendCleaning(roomId, `/rooms/${roomId}/cleaning`, 'PATCH', { cleaning: p })
+      : mockCleaning.change(roomId, p),
+  finish: async (roomId: number) =>
+    API_URL
+      ? sendCleaning(roomId, `/rooms/${roomId}/cleaning/finish`, 'POST', undefined, true)
+      : mockCleaning.finish(roomId),
+  undo: async (roomId: number) =>
+    API_URL
+      ? sendCleaning(roomId, `/rooms/${roomId}/cleaning/undo`, 'POST', undefined, true)
+      : mockCleaning.undo(roomId),
+  // Blank = fixed. The room carries the note too, so its homestay reloads.
+  damage: async (roomId: number, note: string) =>
+    API_URL
+      ? sendCleaning(roomId, `/rooms/${roomId}/damage`, 'PATCH', { room: { damage_note: note } }, true)
+      : mockCleaning.damage(roomId, note),
+}
+
+// Thành viên with ids, for Người làm. Mock: the names numbered from 1.
+export function useTeam(placeId: number, mock: string[]) {
+  const [team, setTeam] = useState(() => (API_URL ? [] : mock.map((name, i) => ({ id: i + 1, name }))))
+  useEffect(() => {
+    if (!API_URL) return
+    api<{ members: { id: number; name: string }[] }>(`/places/${placeId}/members`)
+      .then((r) => setTeam(r.members.map(({ id, name }) => ({ id, name }))))
+      .catch(() => {})
+  }, [placeId])
+  return team
 }

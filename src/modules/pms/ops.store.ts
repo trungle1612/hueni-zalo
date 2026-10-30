@@ -1,7 +1,8 @@
 import dayjs from 'dayjs'
 import { create } from 'zustand'
 
-import { Booking, GuestDoc, isStaying, occupies, today, usePms } from './pms.store'
+import { Booking, GuestDoc, isStaying, needsCleaning, occupies, Room, today, usePms } from './pms.store'
+import type { Cleaning } from './remote'
 
 // Khai báo lưu trú, Giao ca, Buồng phòng.
 // ponytail: front-desk state the API doesn't have yet (till, expenses, cleaning checklists) lives here in memory.
@@ -113,3 +114,76 @@ export const cleanOf = (cleans: Ops['cleans'], roomId: number): Clean => {
 }
 export const patchClean = (roomId: number, p: Partial<Clean>) =>
   useOps.setState((s) => ({ cleans: { ...s.cleans, [roomId]: { ...cleanOf(s.cleans, roomId), ...p } } }))
+
+// ---------- buồng phòng mock: without API_URL only; the rules are hueni-api#166's ----------
+
+const roomOf = (id: number) => usePms.getState().rooms.find((r) => r.id === id)!
+const patchRoom = (id: number, p: Partial<Room>) =>
+  usePms.setState((s) => ({ rooms: s.rooms.map((r) => (r.id === id ? { ...r, ...p } : r)) }))
+
+// The row GET /places/:id/housekeeping would send; members are STAFF numbered from 1.
+const mockRow = (room: Room): Cleaning | undefined => {
+  const c = cleanOf(useOps.getState().cleans, room.id)
+  const mine = usePms
+    .getState()
+    .bookings.filter((b) => b.room_id === room.id && b.status !== 'cancelled' && !b.checked_out_at)
+  const base = { room_id: room.id, room_name: room.name, damage_note: room.damage_note, urgent: false }
+  if (needsCleaning(room) || c.done === today()) {
+    const touched = c.who || c.started || c.done || c.checks.some(Boolean)
+    return {
+      ...base,
+      kind: 'checkout',
+      urgent: mine.some((b) => !b.checked_in_at && b.start_date === today()),
+      task: touched
+        ? {
+            id: room.id,
+            assignee_id: STAFF.indexOf(c.who) + 1 || undefined,
+            assignee_name: c.who || undefined,
+            checks: c.checks,
+            started_at: c.started ? today() : undefined,
+            done_at: c.done,
+          }
+        : undefined,
+    }
+  }
+  if (mine.some(isStaying)) return { ...base, kind: 'daily' }
+}
+
+export const mockHousekeeping = (placeId: number) => ({
+  checklist: CHECKLIST,
+  rows: usePms
+    .getState()
+    .rooms.filter((r) => r.place_id === placeId && r.active)
+    .flatMap((r) => mockRow(r) || [])
+    .sort((a, b) => Number(b.urgent) - Number(a.urgent) || a.kind.localeCompare(b.kind)),
+})
+
+export const mockCleaning = {
+  change: async (roomId: number, p: { assignee_id?: number; checks?: boolean[]; start?: boolean }) => {
+    if (!needsCleaning(roomOf(roomId))) return 'Phòng không cần dọn'
+    patchClean(roomId, {
+      ...(p.assignee_id !== undefined && { who: STAFF[p.assignee_id - 1] || '' }),
+      ...(p.checks && { checks: p.checks }),
+      ...(p.start && { started: true }),
+    })
+    return mockRow(roomOf(roomId))!
+  },
+  finish: async (roomId: number) => {
+    const c = cleanOf(useOps.getState().cleans, roomId)
+    if (!needsCleaning(roomOf(roomId))) return 'Phòng không cần dọn'
+    if (!c.who) return 'Chọn người dọn trước'
+    if (!c.checks.every(Boolean)) return `Đánh dấu đủ ${CHECKLIST.length} việc trước khi xong`
+    usePms.getState().actions.clean(roomId)
+    patchClean(roomId, { started: true, done: today() })
+    return mockRow(roomOf(roomId))!
+  },
+  undo: async (roomId: number) => {
+    patchRoom(roomId, { housekeeping: 'dirty' })
+    patchClean(roomId, { done: undefined })
+    return mockRow(roomOf(roomId))!
+  },
+  damage: async (roomId: number, note: string) => {
+    patchRoom(roomId, { damage_note: note.trim() || undefined })
+    return mockRow(roomOf(roomId))!
+  },
+}
