@@ -4,7 +4,7 @@ import { API_URL } from '@/constants/common'
 
 import { api, ApiError } from './api'
 import { Guest, GuestProfile, mockGuests, mockProfile } from './guests.store'
-import { mockCleaning, mockHousekeeping } from './ops.store'
+import { mockCleaning, mockHousekeeping, mockShift, Ops, Shift, ShiftClose, useOps } from './ops.store'
 import { addDays, AMENITY, Booking, day, Feed, PayMethod, Room, ROOM_TYPE, RoomDraft, usePms } from './pms.store'
 import { addGroupRooms, createGroup, Group, useSales } from './sales.store'
 
@@ -658,4 +658,106 @@ export function useTeam(placeId: number, mock: string[]) {
       .catch(() => {})
   }, [placeId])
   return team
+}
+
+// ---------- giao ca (#27, hueni-api#167) ----------
+
+// Thành viên with ids, for Người nhận ca (handed_to_id). `mock` names without the API.
+export function useMemberIds(placeId: number | undefined, mock: string[]) {
+  const [members, setMembers] = useState(() => mock.map((name, i) => ({ id: i + 1, name })))
+  useEffect(() => {
+    if (!API_URL || !placeId) return
+    api<{ members: { id: number; name: string }[] }>(`/places/${placeId}/members`)
+      .then((r) => setMembers(r.members))
+      .catch(() => {})
+  }, [placeId])
+  return members
+}
+
+type Count = {
+  counted?: number
+  denominations?: Record<string, number>
+  keep?: number
+  handed_to_id?: number
+  note?: string
+}
+type ExpenseDraft = { amount: number; reason: string }
+
+// The till since the last close. The server computes `expected` and checks the close (keep ≤ counted, a note
+// on a difference); every write answers with the shift. Without the API, the mock in ops.store.
+export function useShift(placeId: number) {
+  const [shift, setShift] = useState<Shift>()
+  const [error, setError] = useState<string>()
+  useEffect(() => {
+    if (!API_URL) return setShift(mockShift(placeId))
+    api<Shift>(`/places/${placeId}/shift`)
+      .then(setShift)
+      .catch((e) => setError(message(e)))
+  }, [placeId])
+
+  const write = async (path: string, method: string, body: unknown, mock: () => void): Promise<Result> => {
+    try {
+      if (API_URL) return setShift(await api<Shift>(path, { method, body }))
+      mock()
+      setShift(mockShift(placeId))
+    } catch (e) {
+      return message(e)
+    }
+  }
+  const mockExpenses = (f: (l: Ops['expenses']) => Ops['expenses']) =>
+    useOps.setState((s) => ({ expenses: f(s.expenses) }))
+
+  return {
+    shift,
+    error,
+    addExpense: (expense: ExpenseDraft) =>
+      write(`/places/${placeId}/cash_expenses`, 'POST', { expense }, () =>
+        mockExpenses((l) => [
+          ...l,
+          { ...expense, place_id: placeId, id: Date.now(), at: new Date().toISOString(), by: null, user_id: null },
+        ]),
+      ),
+    updateExpense: (id: number, expense: ExpenseDraft) =>
+      write(`/cash_expenses/${id}`, 'PATCH', { expense }, () =>
+        mockExpenses((l) => l.map((e) => (e.id === id ? { ...e, ...expense } : e))),
+      ),
+    deleteExpense: (id: number) =>
+      write(`/cash_expenses/${id}`, 'DELETE', undefined, () => mockExpenses((l) => l.filter((e) => e.id !== id))),
+
+    // Chốt ca: the close to show, or the server's sentence. The next shift starts from `keep`.
+    close: async (count: Count): Promise<ShiftClose | string> => {
+      if (!API_URL) {
+        const s = mockShift(placeId)
+        const counted = count.denominations
+          ? Object.entries(count.denominations).reduce((n, [d, k]) => n + Number(d) * k, 0)
+          : count.counted || 0
+        const close: ShiftClose = {
+          id: Date.now(),
+          at: new Date().toISOString(),
+          by: usePms.getState().user.name,
+          opening: s.opening,
+          expected: s.expected,
+          counted,
+          difference: counted - s.expected,
+          denominations: count.denominations || null,
+          keep: count.keep || 0,
+          handed_to_id: count.handed_to_id || null,
+          handed_to: null,
+          note: count.note || null,
+        }
+        useOps.setState((o) => ({ closes: [...o.closes, { ...close, place_id: placeId }] }))
+        setShift(mockShift(placeId))
+        return close
+      }
+      try {
+        const r = await api<{ close: ShiftClose; shift: Shift }>(`/places/${placeId}/shift/close`, {
+          body: { shift_close: count },
+        })
+        setShift(r.shift)
+        return r.close
+      } catch (e) {
+        return message(e)
+      }
+    },
+  }
 }

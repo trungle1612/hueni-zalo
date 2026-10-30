@@ -3,78 +3,57 @@ import './ops.scss'
 import dayjs from 'dayjs'
 import React, { useState } from 'react'
 
-import { A, AppBar, Field, KV, MoneyInput, Screen, Sec, Sheet, useCurrent } from '@/modules/pms/components/ui'
-import { OPENING_CASH, STAFF, useOps } from '@/modules/pms/ops.store'
-import { guestLabel, money, PAY_METHOD, usePms } from '@/modules/pms/pms.store'
-import { useMembers } from '@/modules/pms/remote'
+import { A, AppBar, Field, KV, MoneyInput, Screen, Sec, Sheet, Spinner, useCurrent } from '@/modules/pms/components/ui'
+import { Expense, ShiftClose, STAFF } from '@/modules/pms/ops.store'
+import { can, money, usePms } from '@/modules/pms/pms.store'
+import { useMemberIds, useShift } from '@/modules/pms/remote'
 
 const DENOMS = [500000, 200000, 100000, 50000, 20000, 10000]
 const signed = (n: number) => (n > 0 ? `+${money(n)}` : money(n))
-const isToday = (iso: string) => dayjs(iso).isSame(dayjs(), 'day')
-const shiftName = (h = dayjs().hour()) =>
-  h < 14 ? 'Ca sáng 06:00 – 14:00' : h < 22 ? 'Ca chiều 14:00 – 22:00' : 'Ca đêm 22:00 – 06:00'
 
-// Giao ca: what the till should hold by the app, what was counted, and who takes over.
-// ponytail: one shift per day per place; real shift boundaries come with the API.
+// Giao ca (#27): the till since the last close as hueni-api computes it, what was counted, and who takes over.
+// The server checks the close (keep ≤ counted, a note on a difference) and answers in Vietnamese.
 export default function ShiftPage() {
-  const { bookings, user } = usePms()
-  const { place, rooms, roomOf } = useCurrent()
-  const { expenses, closes } = useOps()
+  const { user } = usePms()
+  const { place } = useCurrent()
+  const { shift, error: loadError, addExpense, updateExpense, deleteExpense, close } = useShift(place.id)
   const [byDenom, setByDenom] = useState(false)
   const [counted, setCounted] = useState<number>()
   const [denom, setDenom] = useState<Record<number, number>>({})
   const [note, setNote] = useState('')
-  const [tried, setTried] = useState(false)
-  const staff = useMembers(place.id, STAFF)
-  const [picked, setNext] = useState<string>()
-  const next = picked ?? (staff.find((s) => s !== user.name) || staff[0])
-  const [keep, setKeep] = useState<number | undefined>(OPENING_CASH)
-  const [spend, setSpend] = useState<{ amount?: number; reason: string }>()
+  const others = useMemberIds(place.id, STAFF).filter((m) => m.id !== user.id)
+  const [picked, setNext] = useState<number>()
+  const next = picked ?? others[0]?.id
+  const [keep, setKeep] = useState<number | null>() // undefined: not touched, take the opening
+  const [spend, setSpend] = useState<{ id?: number; amount?: number; reason: string; error?: string }>()
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string>()
+  const [done, setDone] = useState<ShiftClose>()
 
-  const ids = new Set(rooms.map((r) => r.id))
-  const pays = bookings
-    .filter((b) => ids.has(b.room_id))
-    .flatMap((b) => (b.payments || []).filter((p) => isToday(p.at)).map((p) => ({ p, b })))
-  const cash = pays.filter((x) => x.p.method === 'cash')
-  const other = pays.filter((x) => x.p.method !== 'cash')
-  const spends = expenses.filter((e) => e.place_id === place.id && isToday(e.at))
-  const cashIn = cash.reduce((n, x) => n + x.p.amount, 0)
-  const spent = spends.reduce((n, e) => n + e.amount, 0)
-  const expected = OPENING_CASH + cashIn - spent
-
-  const denomSum = DENOMS.reduce((n, d) => n + d * (denom[d] || 0), 0)
-  const count = byDenom ? denomSum : counted || 0
-  const hasCount = byDenom ? denomSum > 0 : counted !== undefined
-  const diff = count - expected
-  const needNote = hasCount && diff !== 0
-  const noteErr = tried && needNote && !note.trim()
-  const keepErr = hasCount && (keep || 0) > count
-  const closed = closes.find((c) => c.place_id === place.id && isToday(c.at))
-
-  if (closed) {
-    const d = closed.counted - closed.expected
+  if (done) {
+    const d = done.difference
     return (
       <Screen>
-        <AppBar lead="back" title="Đã chốt ca" sub={`${shiftName(dayjs(closed.at).hour())} · ${user.name}`} />
+        <AppBar lead="back" title="Đã chốt ca" sub={done.by || user.name} />
         <main className="scroll">
           <div className="sec" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <div className="ok-box" role="status">
-              <b>Đã chốt ca lúc {dayjs(closed.at).format('HH:mm')}</b>
+              <b>Đã chốt ca lúc {dayjs(done.at).format('HH:mm')}</b>
               <span>
-                {d === 0
-                  ? 'Két khớp. Báo cáo ca đã gửi chủ cơ sở.'
-                  : `Két lệch ${signed(d)}, lý do đã gửi chủ cơ sở: “${closed.note}”.`}
+                {d === 0 ? 'Két khớp. Báo cáo ca đã gửi chủ cơ sở.' : `Két lệch ${signed(d)}, lý do: “${done.note}”.`}
               </span>
             </div>
             <dl className="panel">
-              <KV label="Phải có trong két">{money(closed.expected)}</KV>
-              <KV label="Đếm được">{money(closed.counted)}</KV>
+              <KV label="Phải có trong két">{money(done.expected)}</KV>
+              <KV label="Đếm được">{money(done.counted)}</KV>
               <KV label="Chênh lệch" total>
                 {signed(d)}
               </KV>
-              <KV label="Để lại cho ca sau">{money(closed.keep)}</KV>
-              <KV label="Nộp chủ cơ sở">{money(closed.counted - closed.keep)}</KV>
-              <KV label="Người nhận ca">{closed.next}</KV>
+              <KV label="Để lại cho ca sau">{money(done.keep)}</KV>
+              <KV label="Nộp chủ cơ sở">{money(done.counted - done.keep)}</KV>
+              <KV label="Người nhận ca">
+                {done.handed_to || others.find((m) => m.id === done.handed_to_id)?.name || '—'}
+              </KV>
             </dl>
             <A className="btn btn-block" to="/more" replace>
               Xong
@@ -85,27 +64,70 @@ export default function ShiftPage() {
     )
   }
 
-  function close() {
-    if (needNote && !note.trim()) return setTried(true)
-    useOps.setState((s) => ({
-      closes: [
-        ...s.closes,
-        {
-          place_id: place.id,
-          at: new Date().toISOString(),
-          expected,
-          counted: count,
-          keep: keep || 0,
-          next,
-          note: note.trim(),
-        },
-      ],
-    }))
+  if (!shift)
+    return (
+      <Screen>
+        <AppBar lead="back" title="Giao ca" />
+        <main className="scroll">
+          <div className="sec">
+            {loadError ? (
+              <div className="alert" role="alert">
+                {loadError}
+              </div>
+            ) : (
+              <Spinner />
+            )}
+          </div>
+        </main>
+      </Screen>
+    )
+
+  const denomSum = DENOMS.reduce((n, d) => n + d * (denom[d] || 0), 0)
+  const count = byDenom ? denomSum : counted || 0
+  const hasCount = byDenom ? denomSum > 0 : counted !== undefined
+  const diff = count - shift.expected
+  const left = keep === undefined ? shift.opening : keep
+  const other = [
+    shift.other.bank && `chuyển khoản ${money(shift.other.bank)}`,
+    shift.other.card && `thẻ ${money(shift.other.card)}`,
+  ].filter(Boolean)
+  const mine = (e: Expense) => e.user_id === user.id || can(place, 'manage')
+
+  async function run(f: () => Promise<string | void>) {
+    setBusy(true)
+    const err = await f()
+    setBusy(false)
+    return err
+  }
+
+  async function submit() {
+    const r = await run(async () => {
+      const c = await close({
+        ...(byDenom ? { denominations: Object.fromEntries(DENOMS.map((d) => [d, denom[d] || 0])) } : { counted }),
+        keep: left ?? undefined,
+        handed_to_id: next,
+        note: note.trim(),
+      })
+      if (typeof c === 'string') return c
+      setDone(c)
+    })
+    setError(r || undefined)
+  }
+
+  async function saveSpend() {
+    const s = spend!
+    const body = { amount: s.amount!, reason: s.reason.trim() }
+    const err = await run(() => (s.id ? updateExpense(s.id, body) : addExpense(body)))
+    setSpend(err ? { ...s, error: err } : undefined)
   }
 
   return (
     <Screen>
-      <AppBar lead="back" title="Giao ca" sub={`${shiftName()} · ${user.name}`} />
+      <AppBar
+        lead="back"
+        title="Giao ca"
+        sub={shift.since ? `Từ ${dayjs(shift.since).format('HH:mm DD/MM')} · ${user.name}` : user.name}
+      />
       <main className="scroll">
         <Sec
           title="Tiền mặt theo app"
@@ -116,34 +138,36 @@ export default function ShiftPage() {
           }
         >
           <dl className="panel">
-            <KV label="Đầu ca (nhận từ ca trước)">{money(OPENING_CASH)}</KV>
-            <KV label={`Thu tiền mặt · ${cash.length} khoản`}>{signed(cashIn)}</KV>
-            {cash.map(({ p, b }, i) => (
-              <div className="kv sub" key={i}>
+            <KV label="Đầu ca (nhận từ ca trước)">{money(shift.opening)}</KV>
+            <KV label="Thu tiền mặt">{signed(shift.cash_in)}</KV>
+            {shift.cash_out > 0 && <KV label="Hoàn tiền mặt cho khách">{money(-shift.cash_out)}</KV>}
+            <KV label={`Chi · ${shift.expenses.length} khoản`}>{money(-shift.expenses_total)}</KV>
+            {shift.expenses.map((e) => (
+              <div className="kv sub" key={e.id}>
                 <dt>
-                  P{roomOf(b.room_id)?.name} {guestLabel(b)} · {p.amount < 0 ? 'hoàn tiền' : p.deposit ? 'cọc' : 'thu'}
+                  {mine(e) ? (
+                    <button
+                      type="button"
+                      className="link"
+                      onClick={() => setSpend({ id: e.id, amount: e.amount, reason: e.reason })}
+                    >
+                      {e.reason}
+                    </button>
+                  ) : (
+                    e.reason
+                  )}
+                  {e.by && ` · ${e.by}`}
                 </dt>
-                <dd>{money(p.amount)}</dd>
-              </div>
-            ))}
-            <KV label={`Chi · ${spends.length} khoản`}>{money(-spent)}</KV>
-            {spends.map((e, i) => (
-              <div className="kv sub" key={i}>
-                <dt>{e.reason}</dt>
                 <dd>{money(e.amount)}</dd>
               </div>
             ))}
             <KV label="Phải có trong két" total>
-              {money(expected)}
+              {money(shift.expected)}
             </KV>
           </dl>
           {other.length > 0 && (
             <p className="help" style={{ marginTop: 8 }}>
-              {other
-                .map((x) => PAY_METHOD[x.p.method])
-                .filter((v, i, a) => a.indexOf(v) === i)
-                .join(' và ')}{' '}
-              trong ca: {money(other.reduce((n, x) => n + x.p.amount, 0))} ({other.length} khoản) — không tính vào két.
+              Trong ca có {other.join(' và ')}, không tính vào két.
             </p>
           )}
         </Sec>
@@ -189,11 +213,8 @@ export default function ShiftPage() {
                 <span>{signed(diff)}</span>
               </div>
             )}
-            {needNote && (
-              <Field
-                label="Giải thích chênh lệch"
-                error={noteErr && 'Cần ghi lý do khi két bị lệch. Chủ cơ sở sẽ nhận thông báo.'}
-              >
+            {hasCount && diff !== 0 && (
+              <Field label="Giải thích chênh lệch" help="Két lệch thì cần ghi lý do. Chủ cơ sở sẽ thấy.">
                 {(p) => (
                   <textarea
                     {...p}
@@ -211,34 +232,40 @@ export default function ShiftPage() {
           <div className="panel form">
             <Field label="Người nhận ca sau">
               {(p) => (
-                <select {...p} value={next} onChange={(e) => setNext(e.target.value)}>
-                  {staff
-                    .filter((s) => s !== user.name)
-                    .map((s) => (
-                      <option key={s}>{s}</option>
-                    ))}
+                <select {...p} value={next} onChange={(e) => setNext(Number(e.target.value))}>
+                  {others.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.name}
+                    </option>
+                  ))}
                 </select>
               )}
             </Field>
             <Field
               label="Để lại trong két cho ca sau (đ)"
-              error={keepErr && 'Không thể để lại nhiều hơn số tiền đếm được.'}
-              help={`Phần còn lại (${money(Math.max(count - (keep || 0), 0))}) nộp cho chủ cơ sở.`}
+              help={`Phần còn lại (${money(Math.max(count - (left || 0), 0))}) nộp cho chủ cơ sở.`}
             >
-              {(p) => <MoneyInput {...p} value={keep} onChange={setKeep} />}
+              {(p) => <MoneyInput {...p} value={left ?? undefined} onChange={(v) => setKeep(v ?? null)} />}
             </Field>
           </div>
         </Sec>
+        {error && (
+          <div className="sec">
+            <div className="alert" role="alert">
+              {error}
+            </div>
+          </div>
+        )}
         <div className="end" />
       </main>
       <div className="footer-bar">
-        <button type="button" className="btn btn-primary btn-block" disabled={!hasCount || keepErr} onClick={close}>
+        <button type="button" className="btn btn-primary btn-block" disabled={!hasCount || busy} onClick={submit}>
           Chốt ca và bàn giao
         </button>
       </div>
 
       {spend && (
-        <Sheet title="Ghi khoản chi tiền mặt" onClose={() => setSpend(undefined)}>
+        <Sheet title={spend.id ? 'Sửa khoản chi' : 'Ghi khoản chi tiền mặt'} onClose={() => setSpend(undefined)}>
           <Field label="Số tiền (đ)">
             {(p) => <MoneyInput {...p} value={spend.amount} onChange={(amount) => setSpend({ ...spend, amount })} />}
           </Field>
@@ -253,27 +280,32 @@ export default function ShiftPage() {
               />
             )}
           </Field>
+          {spend.error && (
+            <div className="alert" role="alert">
+              {spend.error}
+            </div>
+          )}
           <button
             type="button"
             className="btn btn-primary btn-block"
-            disabled={!spend.amount || !spend.reason.trim()}
-            onClick={() => {
-              useOps.setState((s) => ({
-                expenses: [
-                  ...s.expenses,
-                  {
-                    place_id: place.id,
-                    amount: spend.amount!,
-                    reason: spend.reason.trim(),
-                    at: new Date().toISOString(),
-                  },
-                ],
-              }))
-              setSpend(undefined)
-            }}
+            disabled={!spend.amount || !spend.reason.trim() || busy}
+            onClick={saveSpend}
           >
-            Ghi khoản chi
+            {spend.id ? 'Lưu' : 'Ghi khoản chi'}
           </button>
+          {spend.id && (
+            <button
+              type="button"
+              className="btn btn-ghost btn-block"
+              disabled={busy}
+              onClick={async () => {
+                const err = await run(() => deleteExpense(spend.id!))
+                setSpend(err ? { ...spend, error: err } : undefined)
+              }}
+            >
+              Xoá khoản chi
+            </button>
+          )}
           <button type="button" className="btn btn-ghost btn-block" onClick={() => setSpend(undefined)}>
             Đóng
           </button>
