@@ -1,85 +1,63 @@
 import './ops.scss'
 
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 
-import { AppBar, Badge, Field, Screen, Sec, Sheet, toast, useCurrent, useRecord } from '@/modules/pms/components/ui'
-import { CHECKLIST, cleanOf, patchClean, STAFF, useOps } from '@/modules/pms/ops.store'
-import { fmtDate, guestLabel, isStaying, needsCleaning, Room, today, usePms } from '@/modules/pms/pms.store'
-import { remote, useMembers } from '@/modules/pms/remote'
+import { AppBar, Badge, Field, Screen, Sec, Sheet, toast, useCurrent } from '@/modules/pms/components/ui'
+import { STAFF } from '@/modules/pms/ops.store'
+import { Cleaning, cleaning, fetchHousekeeping, Housekeeping, useTeam } from '@/modules/pms/remote'
 
-type Task = { room: Room; daily: boolean; note: string; urgent: boolean; done: boolean; who: string; started: boolean }
+const kindOf = (t: Cleaning) => (t.kind === 'daily' ? 'Dọn hằng ngày' : 'Dọn sau trả phòng')
+const whoOf = (t: Cleaning) => t.task?.assignee_name || ''
+const noteOf = (t: Cleaning) =>
+  t.task?.done_at
+    ? 'Đã dọn xong'
+    : t.kind === 'daily'
+      ? 'Khách đang ở · dọn khi khách ra ngoài'
+      : t.task?.started_at
+        ? 'Đang dọn'
+        : 'Chưa bắt đầu'
 
-// Buồng phòng: a cleaning job per dirty room (made by checkout), plus a daily tidy for rooms with guests in.
+// Buồng phòng (#26): the server lists today's jobs (dirty rooms, rooms with a guest in) and decides every rule;
+// this screen shows them grouped by person and sends each tap.
 export default function HousekeepingPage() {
-  const { bookings } = usePms()
-  const { cleans } = useOps()
-  const { place, rooms } = useCurrent()
-  const staff = useMembers(place.id, STAFF)
-  const record = useRecord()
+  const { place } = useCurrent()
+  const team = useTeam(place.id, STAFF)
+  const [data, setData] = useState<Housekeeping | string>()
   const [openId, setOpenId] = useState<number>()
   const [issue, setIssue] = useState('')
-  const [photo, setPhoto] = useState(false)
 
-  const tasks = rooms.flatMap((room): Task[] => {
-    const c = cleanOf(cleans, room.id)
-    const mine = bookings.filter((b) => b.room_id === room.id && b.status !== 'cancelled' && !b.checked_out_at)
-    const staying = mine.find(isStaying)
-    const next = mine
-      .filter((b) => !b.checked_in_at && b.start_date >= today())
-      .sort((a, b) => a.start_date.localeCompare(b.start_date))[0]
-    const base = { room, who: c.who, started: !!c.started }
-    // Dirty: finished only when the room is clean again (an undo of Dọn xong brings the job back).
-    if (needsCleaning(room))
-      return [
-        {
-          ...base,
-          daily: !!staying,
-          done: false,
-          urgent: !staying && next?.start_date === today(),
-          note: staying
-            ? `${guestLabel(staying)} đang ở · dọn khi khách ra ngoài`
-            : next
-              ? `${guestLabel(next)} đến ${next.start_date === today() ? 'hôm nay' : fmtDate(next.start_date)}`
-              : 'Chưa có khách mới',
-        },
-      ]
-    if (c.done === today() && !staying)
-      return [{ ...base, daily: false, done: true, urgent: false, note: 'Đã dọn xong' }]
-    if (staying)
-      return [
-        {
-          ...base,
-          daily: true,
-          done: c.done === today(),
-          urgent: false,
-          note: `${guestLabel(staying)} đang ở · dọn khi khách ra ngoài`,
-        },
-      ]
-    return []
-  })
-  const left = tasks.filter((t) => !t.done)
-  const urgent = left.filter((t) => t.urgent).length
+  useEffect(() => {
+    fetchHousekeeping(place.id).then(setData)
+  }, [place.id])
 
-  async function finish(t: Task) {
-    const extra = issue.trim() ? ' · đã báo hỏng cho chủ cơ sở' : ''
-    if (t.daily && !needsCleaning(t.room)) {
-      patchClean(t.room.id, { done: today() })
-      toast(`Đã dọn phòng ${t.room.name}${extra}`)
-    } else {
-      if (await record(() => remote.clean(t.room.id), `Phòng ${t.room.name} đã sẵn sàng${extra}`)) return
-      patchClean(t.room.id, { done: today() })
+  const rows = typeof data === 'object' ? data.rows : []
+  const checklist = typeof data === 'object' ? data.checklist : []
+
+  // Send a write; its answer replaces the room's row. A refusal shows the server's sentence.
+  async function run(roomId: number, write: Promise<Cleaning | string>, text?: string, undo?: () => void) {
+    const r = await write
+    if (typeof r === 'string') {
+      toast(r)
+      return false
     }
-    // ponytail: the damage note only goes into the toast; it becomes a room issue for the owner with the API.
-    setOpenId(undefined)
+    setData((d) => (typeof d === 'object' ? { ...d, rows: d.rows.map((x) => (x.room_id === roomId ? r : x)) } : d))
+    if (text) toast(text, undo)
+    return true
   }
+  const undo = (t: Cleaning) => () => run(t.room_id, cleaning.undo(t.room_id), `Đã hoàn tác dọn phòng ${t.room_name}`)
+  const show = (t: Cleaning) => (setOpenId(t.room_id), setIssue(t.damage_note || ''))
 
-  const open = tasks.find((t) => t.room.id === openId)
-  const c = open && cleanOf(cleans, open.room.id)
-  const ticked = c ? c.checks.filter(Boolean).length : 0
-  const order = (a: Task, b: Task) => Number(a.done) - Number(b.done) || Number(b.urgent) - Number(a.urgent)
-  const groups = ['', ...staff]
-    .map((who) => ({ who, items: tasks.filter((t) => t.who === who).sort(order) }))
+  const left = rows.filter((t) => !t.task?.done_at)
+  const urgent = left.filter((t) => t.urgent).length
+  const order = (a: Cleaning, b: Cleaning) => Number(!!a.task?.done_at) - Number(!!b.task?.done_at)
+  const groups = ['', ...rows.map(whoOf)]
+    .filter((who, i, all) => all.indexOf(who) === i)
+    .map((who) => ({ who, items: rows.filter((t) => whoOf(t) === who).sort(order) }))
     .filter((g) => g.items.length)
+
+  const open = rows.find((t) => t.room_id === openId)
+  const checks = open?.task?.checks || checklist.map(() => false)
+  const ticked = checks.filter(Boolean).length
 
   return (
     <Screen>
@@ -89,46 +67,43 @@ export default function HousekeepingPage() {
         sub={`Hôm nay · ${left.length} việc chưa xong${urgent ? ` · ${urgent} gấp` : ''}`}
       />
       <main className="scroll">
-        {!tasks.length && <div className="empty">Không có phòng cần dọn hôm nay.</div>}
+        {typeof data !== 'object' && <div className="empty">{data || 'Đang tải…'}</div>}
+        {typeof data === 'object' && !rows.length && <div className="empty">Không có phòng cần dọn hôm nay.</div>}
         {groups.map((g) => (
           <Sec key={g.who} title={g.who || 'Chưa giao'} aside={<span className="aside">{g.items.length} việc</span>}>
             <div className="panel">
               {g.items.map((t) => {
-                const nextLabel = t.done ? '' : t.started ? 'Xong' : 'Bắt đầu'
-                const kind = t.daily ? 'Dọn hằng ngày' : 'Dọn sau trả phòng'
+                const done = !!t.task?.done_at
+                const started = !!t.task?.started_at
                 return (
-                  <div className="row" key={t.room.id}>
+                  <div className="row" key={t.room_id}>
                     <button
                       type="button"
                       className="row-main"
-                      aria-label={`Phòng ${t.room.name}, ${kind}, mở chi tiết`}
-                      onClick={() => (setOpenId(t.room.id), setIssue(''), setPhoto(false))}
+                      aria-label={`Phòng ${t.room_name}, ${kindOf(t)}, mở chi tiết`}
+                      onClick={() => show(t)}
                     >
-                      <span className="rn">{t.room.name}</span>
+                      <span className="rn">{t.room_name}</span>
                       <span className="grow">
-                        <span className="t1">{kind}</span>
-                        <span className="t2 wrap">
-                          {t.note}
-                          {t.started && !t.done && ' · đang dọn'}
-                        </span>
-                        {t.urgent && <span className="t2 urgent">Gấp · khách đến hôm nay</span>}
+                        <span className="t1">{kindOf(t)}</span>
+                        <span className="t2 wrap">{noteOf(t)}</span>
+                        {t.damage_note && <span className="t2 wrap">Báo hỏng: {t.damage_note}</span>}
+                        {t.urgent && !done && <span className="t2 urgent">Gấp · khách đến hôm nay</span>}
                       </span>
                     </button>
-                    {nextLabel && t.who && (
+                    {t.kind === 'checkout' && !done && t.task?.assignee_id && (
                       <button
                         type="button"
                         className="btn btn-sm"
-                        aria-label={`${nextLabel} dọn phòng ${t.room.name}`}
+                        aria-label={`${started ? 'Xong' : 'Bắt đầu'} dọn phòng ${t.room_name}`}
                         onClick={() =>
-                          t.started
-                            ? (setOpenId(t.room.id), setIssue(''), setPhoto(false))
-                            : patchClean(t.room.id, { started: true })
+                          started ? show(t) : run(t.room_id, cleaning.change(t.room_id, { start: true }))
                         }
                       >
-                        {nextLabel}
+                        {started ? 'Xong' : 'Bắt đầu'}
                       </button>
                     )}
-                    {t.done && <Badge tone="positive">Xong</Badge>}
+                    {done && <Badge tone="positive">Xong</Badge>}
                   </div>
                 )
               })}
@@ -144,72 +119,108 @@ export default function HousekeepingPage() {
         <div className="end" />
       </main>
 
-      {open && c && (
-        <Sheet
-          title={`Phòng ${open.room.name} · ${open.daily ? 'Dọn hằng ngày' : 'Dọn sau trả phòng'}`}
-          onClose={() => setOpenId(undefined)}
-        >
-          <p className="help">{open.note}</p>
-          <Field label="Người làm">
-            {(p) => (
-              <select {...p} value={c.who} onChange={(e) => patchClean(open.room.id, { who: e.target.value })}>
-                <option value="">Chưa giao</option>
-                {staff.map((s) => (
-                  <option key={s}>{s}</option>
-                ))}
-              </select>
-            )}
-          </Field>
-          <div className="field">
-            <span className="lbl" id="hk-c">
-              Việc cần làm · {ticked}/{CHECKLIST.length}
-            </span>
-            <div className="panel" role="group" aria-labelledby="hk-c" style={{ padding: '0 12px' }}>
-              {CHECKLIST.map((label, i) => (
-                <label className="check" key={label}>
-                  <input
-                    type="checkbox"
-                    checked={c.checks[i]}
-                    disabled={open.done}
-                    onChange={() =>
-                      patchClean(open.room.id, { checks: c.checks.map((v, k) => (k === i ? !v : v)), started: true })
+      {open && (
+        <Sheet title={`Phòng ${open.room_name} · ${kindOf(open)}`} onClose={() => setOpenId(undefined)}>
+          <p className="help">{noteOf(open)}</p>
+          {open.kind === 'checkout' && (
+            <>
+              <Field label="Người làm">
+                {(p) => (
+                  <select
+                    {...p}
+                    value={open.task?.assignee_id ?? ''}
+                    disabled={!!open.task?.done_at}
+                    onChange={(e) =>
+                      run(open.room_id, cleaning.change(open.room_id, { assignee_id: Number(e.target.value) }))
                     }
-                  />
-                  {label}
-                </label>
-              ))}
-            </div>
-          </div>
+                  >
+                    <option value="" disabled>
+                      Chưa giao
+                    </option>
+                    {team.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.name}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </Field>
+              <div className="field">
+                <span className="lbl" id="hk-c">
+                  Việc cần làm · {ticked}/{checklist.length}
+                </span>
+                <div className="panel" role="group" aria-labelledby="hk-c" style={{ padding: '0 12px' }}>
+                  {checklist.map((label, i) => (
+                    <label className="check" key={label}>
+                      <input
+                        type="checkbox"
+                        checked={checks[i]}
+                        disabled={!!open.task?.done_at}
+                        onChange={() =>
+                          run(
+                            open.room_id,
+                            cleaning.change(open.room_id, {
+                              checks: checks.map((v, k) => (k === i ? !v : v)),
+                              start: true,
+                            }),
+                          )
+                        }
+                      />
+                      {label}
+                    </label>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
           <Field label="Báo hỏng hoặc thiếu đồ" optional>
             {(p) => (
               <textarea
                 {...p}
                 placeholder="Ví dụ: vòi sen rỉ nước"
+                maxLength={200}
                 value={issue}
                 onChange={(e) => setIssue(e.target.value)}
               />
             )}
           </Field>
-          {/* ponytail: no camera yet; becomes zmp-sdk chooseImage. */}
-          <button type="button" className="photo" onClick={() => setPhoto(true)}>
-            {photo ? 'Đã thêm 1 ảnh · chạm để chụp lại' : '+ Chụp ảnh chỗ hỏng'}
-          </button>
-          <button
-            type="button"
-            className="btn btn-primary btn-block"
-            disabled={open.done || ticked < CHECKLIST.length || !c.who}
-            onClick={() => finish(open)}
-          >
-            {open.done
-              ? 'Đã xong'
-              : !c.who
-                ? 'Giao người làm trước'
-                : ticked < CHECKLIST.length
-                  ? `Còn ${CHECKLIST.length - ticked} việc chưa đánh dấu`
-                  : open.daily
-                    ? 'Xong'
-                    : 'Xong, phòng sẵn sàng'}
-          </button>
+          {issue.trim() !== (open.damage_note || '') && (
+            <button
+              type="button"
+              className="btn btn-block"
+              onClick={() =>
+                run(
+                  open.room_id,
+                  cleaning.damage(open.room_id, issue),
+                  issue.trim() ? 'Đã báo hỏng cho chủ cơ sở' : 'Đã xoá báo hỏng',
+                )
+              }
+            >
+              {issue.trim() ? 'Gửi báo hỏng' : 'Đã sửa xong, xoá báo hỏng'}
+            </button>
+          )}
+          {open.kind === 'checkout' &&
+            (open.task?.done_at ? (
+              <button type="button" className="btn btn-block" onClick={undo(open)}>
+                Hoàn tác dọn xong
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="btn btn-primary btn-block"
+                onClick={async () => {
+                  const ok = await run(
+                    open.room_id,
+                    cleaning.finish(open.room_id),
+                    `Phòng ${open.room_name} đã sẵn sàng`,
+                    undo(open),
+                  )
+                  if (ok) setOpenId(undefined)
+                }}
+              >
+                Xong, phòng sẵn sàng
+              </button>
+            ))}
           <button type="button" className="btn btn-ghost btn-block" onClick={() => setOpenId(undefined)}>
             Đóng
           </button>
