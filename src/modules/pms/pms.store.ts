@@ -91,6 +91,8 @@ export type Booking = {
   paid?: number
   due?: number
   guest_flag?: string // Cần lưu ý of this booking's guest (Hồ sơ khách, hueni-api#165)
+  online?: boolean // booked by the guest on the direct booking page (hueni-api#172)
+  hold_expires_at?: string // held for the deposit until then; cancelled by the server if nothing is paid
 }
 
 export type Feed = {
@@ -137,6 +139,8 @@ const WEEKDAY = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7']
 export const weekday = (s: string) => WEEKDAY[dayjs(s).day()]
 export const fmtDay = (s: string) => `${weekday(s)} ${fmtDate(s)}` // T4 21/10
 export const fmtTime = (iso: string) => dayjs(iso).format('DD/MM HH:mm')
+// "giữ chờ cọc đến 14:30": hueni-api times carry the Huế offset, so HH:mm is read as written.
+export const holdUntil = (b: Booking) => b.hold_expires_at && `giữ chờ cọc đến ${b.hold_expires_at.slice(11, 16)}`
 export const nights = (b: Pick<Booking, 'start_date' | 'end_date'>) => daysBetween(b.start_date, b.end_date)
 const isToday = (iso?: string) => !!iso && dayjs(iso).isSame(dayjs(), 'day')
 const nowIso = () => new Date().toISOString()

@@ -19,7 +19,7 @@ import {
   RoomDraft,
   usePms,
 } from './pms.store'
-import { addGroupRooms, createGroup, Group, useSales } from './sales.store'
+import { addGroupRooms, createGroup, Group, Site, SITE_DEFAULT, useSales } from './sales.store'
 import { Policy, RefundRequest, Season, Staff, Surcharge, useSetup } from './setup.store'
 
 // Booking and front-desk actions for the screens connected to hueni-api (#34, #35, wiki Mini-App-API).
@@ -44,7 +44,7 @@ const toRoom = (r: ApiRoom): Room => {
   }
 }
 const toBooking = (b: Booking): Booking => {
-  const x = strip<Booking>(b)
+  const x = strip<Booking>({ ...b, origin: b.online ? 'Trang đặt phòng' : b.origin })
   return x.payments ? { ...x, payments: x.payments.map((p) => strip(p)), charges: x.charges?.map((c) => strip(c)) } : x
 }
 
@@ -943,6 +943,37 @@ export function useRules(placeId: number) {
     save: async (p: { long_stay?: boolean; cancel_policy?: Policy }): Promise<Result> => {
       try {
         setServer(await api<ApiRules>(`/places/${placeId}/rules`, { method: 'PATCH', body: { place: p } }))
+      } catch (e) {
+        return message(e)
+      }
+    },
+  }
+}
+
+// ---------- trang đặt phòng riêng (#32, hueni-api#172): owner only ----------
+// Settings only: the guest-facing page lives on hueni.me. The server checks a room type stays on and that
+// a deposit has a bank account; its sentence is shown as is.
+
+export function useBookingSite(placeId: number) {
+  const mock = useSales((s) => s.sites[placeId]) || SITE_DEFAULT
+  const [server, setServer] = useState<Site>()
+  useEffect(() => {
+    if (API_URL)
+      api<{ booking_site: Site }>(`/places/${placeId}`)
+        .then((p) => setServer(p.booking_site))
+        .catch(() => {})
+  }, [placeId])
+  return {
+    site: API_URL ? server : mock,
+    save: async ({ open, deposit_percent, hidden_room_types, hold_minutes, cutoff_hour }: Site): Promise<Result> => {
+      const site = { open, deposit_percent, hidden_room_types, hold_minutes, cutoff_hour }
+      if (!API_URL) return useSales.getState().saveSite(placeId, site)
+      try {
+        const p = await api<{ booking_site: Site }>(`/places/${placeId}/booking_site`, {
+          method: 'PATCH',
+          body: { booking_site: site },
+        })
+        setServer(p.booking_site)
       } catch (e) {
         return message(e)
       }

@@ -7,7 +7,7 @@ import { create } from 'zustand'
 import { API_URL } from '@/constants/common'
 import { clsx } from '@/utils/clsx'
 
-import { Booking, fmtDay, isStaying, placeRooms, today, usePlace, usePms } from '../pms.store'
+import { Booking, fmtDay, holdUntil, isStaying, placeRooms, today, usePlace, usePms } from '../pms.store'
 
 // ---------- icons (design: only the tab bar, back/close, search and week arrows) ----------
 
@@ -289,6 +289,8 @@ export function bookingStatus(b: Booking): { label: string; tone: Tone } {
   if (isStaying(b))
     return b.end_date <= today() ? { label: 'Trả hôm nay', tone: 'neutral' } : { label: 'Đang ở', tone: 'primary' }
   if (b.status === 'hold') return { label: 'Giữ chỗ', tone: 'warning' }
+  const hold = holdUntil(b)
+  if (hold) return { label: hold[0].toUpperCase() + hold.slice(1), tone: 'warning' }
   return { label: 'Sắp đến', tone: 'info' }
 }
 
