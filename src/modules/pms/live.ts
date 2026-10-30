@@ -6,7 +6,6 @@ import { API_URL } from '@/constants/common'
 // ponytail: static list; move to server-driven flags only if per-homestay rollout is needed.
 const MOCK_ONLY = [
   '/registration', // #29 Khai báo lưu trú
-  '/shift', // #27 Giao ca
   '/housekeeping', // #26 Buồng phòng
   '/guests', // #25 Hồ sơ khách
   '/groups', // #24 Đặt phòng theo đoàn

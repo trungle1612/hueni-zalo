@@ -72,19 +72,43 @@ usePms.setState((s) => ({
 
 // ---------- giao ca, buồng phòng ----------
 
-export type Expense = { place_id: number; amount: number; reason: string; at: string }
-export type ShiftClose = {
-  place_id: number
+// Giao ca as hueni-api sends it (GET /places/:id/shift, #27, hueni-api#167): one shift = everything since the last close.
+export type Expense = {
+  id: number
+  amount: number
+  reason: string
   at: string
+  by: string | null
+  user_id: number | null
+}
+export type ShiftClose = {
+  id: number
+  at: string
+  by: string | null
+  opening: number
   expected: number
   counted: number
+  difference: number
+  denominations: Record<string, number> | null
   keep: number
-  next: string
-  note: string
+  handed_to_id: number | null
+  handed_to: string | null
+  note: string | null
+}
+export type Shift = {
+  since: string | null
+  opening: number
+  cash_in: number
+  cash_out: number
+  expenses_total: number
+  expected: number
+  other: { bank: number; card: number }
+  expenses: Expense[]
+  last_close: ShiftClose | null
 }
 export type Clean = { who: string; checks: boolean[]; started?: boolean; done?: string } // done = date
 
-export const OPENING_CASH = 1000000 // ponytail: handed over by the previous shift; comes from its close once the API keeps shifts
+export const OPENING_CASH = 1000000 // mock only: the first shift's opening; hueni-api starts from the last close's keep
 export const STAFF = ['Em Hằng', 'Lê Thị Mai', 'Nguyễn Văn Tú'] // ponytail: the place's members, from the API
 export const CHECKLIST = [
   'Thay ga, vỏ gối, khăn tắm',
@@ -94,14 +118,24 @@ export const CHECKLIST = [
   'Kiểm tra đồ để quên, đồ hỏng',
 ]
 
-type Ops = {
-  expenses: Expense[]
-  closes: ShiftClose[]
+export type Ops = {
+  expenses: (Expense & { place_id: number })[]
+  closes: (ShiftClose & { place_id: number })[]
   cleans: Record<number, Clean> // by room id, today's only
 }
 
 export const useOps = create<Ops>(() => ({
-  expenses: [{ place_id: 1, amount: 150000, reason: 'Mua nước suối, giấy vệ sinh', at: new Date().toISOString() }],
+  expenses: [
+    {
+      place_id: 1,
+      id: 1,
+      amount: 150000,
+      reason: 'Mua nước suối, giấy vệ sinh',
+      at: new Date().toISOString(),
+      by: 'Em Hằng',
+      user_id: null,
+    },
+  ],
   closes: [],
   cleans: { 2: { who: 'Lê Thị Mai', checks: [true, true, false, false, false], started: true } },
 }))
@@ -113,3 +147,32 @@ export const cleanOf = (cleans: Ops['cleans'], roomId: number): Clean => {
 }
 export const patchClean = (roomId: number, p: Partial<Clean>) =>
   useOps.setState((s) => ({ cleans: { ...s.cleans, [roomId]: { ...cleanOf(s.cleans, roomId), ...p } } }))
+
+// Mock Giao ca for `vite dev` without the API; the server computes all this (hueni-api#167) and checks the close.
+export function mockShift(placeId: number): Shift {
+  const { expenses, closes } = useOps.getState()
+  const last_close = closes.filter((c) => c.place_id === placeId).pop() || null
+  const since = last_close?.at || null
+  const after = (at: string) => (since ? dayjs(at).isAfter(since) : dayjs(at).isSame(dayjs(), 'day'))
+  const { rooms, bookings } = usePms.getState()
+  const ids = new Set(rooms.filter((r) => r.place_id === placeId).map((r) => r.id))
+  const pays = bookings.filter((b) => ids.has(b.room_id)).flatMap((b) => (b.payments || []).filter((p) => after(p.at)))
+  const sum = (method: string, sign = 0) =>
+    pays.filter((p) => p.method === method && (!sign || Math.sign(p.amount) === sign)).reduce((n, p) => n + p.amount, 0)
+  const spends = expenses.filter((e) => e.place_id === placeId && after(e.at))
+  const opening = last_close ? last_close.keep : OPENING_CASH
+  const cash_in = sum('cash', 1)
+  const cash_out = -sum('cash', -1)
+  const expenses_total = spends.reduce((n, e) => n + e.amount, 0)
+  return {
+    since,
+    opening,
+    cash_in,
+    cash_out,
+    expenses_total,
+    expected: opening + cash_in - cash_out - expenses_total,
+    other: { bank: sum('bank'), card: sum('card') },
+    expenses: spends,
+    last_close,
+  }
+}
