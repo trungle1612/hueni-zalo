@@ -3,9 +3,15 @@ import './sales.scss'
 import React, { useState } from 'react'
 
 import { A, AppBar, Field, PlaceSub, Screen, Sec, Segmented, toast, useCurrent } from '@/modules/pms/components/ui'
-import { addDays, can, isOpen, isRoomFree, money, today, usePms } from '@/modules/pms/pms.store'
-import { Site, SITE_DEFAULT, useSales } from '@/modules/pms/sales.store'
+import { addDays, can, isOpen, isRoomFree, money, ROOM_TYPE, today, usePms } from '@/modules/pms/pms.store'
+import { useBookingSite } from '@/modules/pms/remote'
+import { Site } from '@/modules/pms/sales.store'
 
+const HOLDS: [Site['hold_minutes'], string][] = [
+  [15, '15 phút'],
+  [30, '30 phút'],
+  [120, '2 giờ'],
+]
 const DEPOSITS: [string, string][] = [
   ['0', 'Không'],
   ['30', '30%'],
@@ -13,15 +19,13 @@ const DEPOSITS: [string, string][] = [
   ['100', '100%'],
 ]
 
-// Owner only: what the direct booking page offers. Guests book without OTA commission.
-// ponytail: settings only; the guest-facing page and VietQR deposit come with hueni-api.
+// Owner only: what the direct booking page on hueni.me offers. Guests book without OTA commission.
 export default function BookingSitePage() {
   const bookings = usePms((s) => s.bookings)
   const { place, rooms } = useCurrent()
-  const saved = useSales((s) => s.sites[place.id]) || SITE_DEFAULT
-  const saveSite = useSales((s) => s.saveSite)
-  const [f, setF] = useState<Site>(saved)
-  const set = (p: Partial<Site>) => setF({ ...f, ...p })
+  const { site: saved, save } = useBookingSite(place.id)
+  const [draft, setDraft] = useState<Site>()
+  const [busy, setBusy] = useState(false)
 
   if (!can(place, 'manage')) {
     return (
@@ -44,19 +48,46 @@ export default function BookingSitePage() {
     )
   }
 
-  // One line per room kind: lowest price, rooms free tonight.
-  const kinds = Array.from(new Set(rooms.filter(isOpen).map((r) => r.kind || 'Phòng'))).map((name) => {
-    const list = rooms.filter((r) => isOpen(r) && (r.kind || 'Phòng') === name)
-    const prices = list.map((r) => r.price).filter((p): p is number => !!p)
-    return {
-      name,
-      count: list.length,
-      from: prices.length ? Math.min(...prices) : undefined,
-      left: list.filter((r) => isRoomFree(bookings, r.id, today(), addDays(today(), 1))).length,
-    }
-  })
-  const shown = kinds.filter((k) => !f.hidden.includes(k.name))
-  const dirty = JSON.stringify(f) !== JSON.stringify(saved)
+  if (!saved)
+    return (
+      <Screen>
+        <AppBar lead="back" title="Trang đặt phòng riêng" sub={<PlaceSub />} />
+        <main className="scroll">
+          <div className="empty">Đang tải…</div>
+        </main>
+      </Screen>
+    )
+  const f = draft || saved
+  const set = (p: Partial<Site>) => setDraft({ ...f, ...p })
+
+  // One line per room type (ROOM_TYPE key): lowest price, rooms free tonight. Rooms without a type are never offered.
+  const open = rooms.filter((r) => r.active)
+  const keyOf = (kind?: string) => Object.keys(ROOM_TYPE).find((k) => ROOM_TYPE[k] === kind)
+  const untyped = open.filter((r) => !keyOf(r.kind)).length
+  const kinds = Object.keys(ROOM_TYPE)
+    .map((key) => {
+      const list = open.filter((r) => keyOf(r.kind) === key)
+      const prices = list.map((r) => r.price).filter((p): p is number => !!p)
+      return {
+        key,
+        name: ROOM_TYPE[key],
+        count: list.length,
+        from: prices.length ? Math.min(...prices) : undefined,
+        left: list.filter((r) => isOpen(r) && isRoomFree(bookings, r.id, today(), addDays(today(), 1))).length,
+      }
+    })
+    .filter((k) => k.count)
+  const shown = kinds.filter((k) => !f.hidden_room_types.includes(k.key))
+  const dirty = !!draft && JSON.stringify(draft) !== JSON.stringify(saved)
+
+  async function submit() {
+    setBusy(true)
+    const error = await save(f)
+    setBusy(false)
+    if (error) return toast(error)
+    setDraft(undefined)
+    toast('Đã cập nhật trang đặt phòng')
+  }
 
   return (
     <Screen>
@@ -92,10 +123,10 @@ export default function BookingSitePage() {
         <Sec title="Phòng hiển thị">
           <div className="panel form">
             {kinds.map((k) => {
-              const on = !f.hidden.includes(k.name)
-              const id = `kind-${k.name}`
+              const on = !f.hidden_room_types.includes(k.key)
+              const id = `kind-${k.key}`
               return (
-                <div key={k.name} className="switch-row">
+                <div key={k.key} className="switch-row">
                   <div>
                     <div style={{ fontWeight: 600 }} id={id}>
                       {k.name}
@@ -110,7 +141,13 @@ export default function BookingSitePage() {
                     role="switch"
                     aria-checked={on}
                     aria-labelledby={id}
-                    onClick={() => set({ hidden: on ? [...f.hidden, k.name] : f.hidden.filter((x) => x !== k.name) })}
+                    onClick={() =>
+                      set({
+                        hidden_room_types: on
+                          ? [...f.hidden_room_types, k.key]
+                          : f.hidden_room_types.filter((x) => x !== k.key),
+                      })
+                    }
                   >
                     <span />
                   </button>
@@ -118,7 +155,14 @@ export default function BookingSitePage() {
               )
             })}
           </div>
-          {!shown.length && <div className="error">Bật ít nhất một loại phòng, nếu không khách không đặt được.</div>}
+          {untyped > 0 && (
+            <p className="help" style={{ marginTop: 8 }}>
+              {untyped} phòng chưa có loại nên không hiện trên trang. <A to="/rooms">Đặt loại phòng</A>
+            </p>
+          )}
+          {f.open && !shown.length && (
+            <div className="error">Bật ít nhất một loại phòng, nếu không khách không đặt được.</div>
+          )}
         </Sec>
 
         <Sec title="Cọc và giữ phòng">
@@ -127,34 +171,49 @@ export default function BookingSitePage() {
               <span className="lbl">Khách cọc trước</span>
               <Segmented
                 label="Mức cọc"
-                value={String(f.deposit)}
+                value={String(f.deposit_percent)}
                 options={DEPOSITS}
-                onChange={(v) => set({ deposit: Number(v) as Site['deposit'] })}
+                onChange={(v) => set({ deposit_percent: Number(v) as Site['deposit_percent'] })}
               />
             </div>
             <div className="grid2">
               <Field label="Giữ phòng chờ cọc">
                 {(p) => (
-                  <select {...p} value={f.hold} onChange={(e) => set({ hold: e.target.value })}>
-                    {['15 phút', '30 phút', '2 giờ'].map((o) => (
-                      <option key={o}>{o}</option>
+                  <select
+                    {...p}
+                    value={f.hold_minutes}
+                    disabled={!f.deposit_percent}
+                    onChange={(e) => set({ hold_minutes: Number(e.target.value) as Site['hold_minutes'] })}
+                  >
+                    {HOLDS.map(([v, label]) => (
+                      <option key={v} value={v}>
+                        {label}
+                      </option>
                     ))}
                   </select>
                 )}
               </Field>
               <Field label="Hạn đặt trong ngày">
                 {(p) => (
-                  <select {...p} value={f.cutoff} onChange={(e) => set({ cutoff: e.target.value })}>
-                    {['18:00', '20:00', '22:00'].map((o) => (
-                      <option key={o} value={o}>
-                        đến {o}
+                  <select
+                    {...p}
+                    value={f.cutoff_hour}
+                    onChange={(e) => set({ cutoff_hour: Number(e.target.value) as Site['cutoff_hour'] })}
+                  >
+                    {[18, 20, 22].map((h) => (
+                      <option key={h} value={h}>
+                        đến {h}:00
                       </option>
                     ))}
                   </select>
                 )}
               </Field>
             </div>
-            <p className="help">Hết thời gian giữ mà chưa cọc, phòng tự mở lại và khách nhận tin báo.</p>
+            <p className="help">
+              {f.deposit_percent
+                ? 'Hết thời gian giữ mà chưa thu đồng nào, đặt phòng tự huỷ và phòng mở lại. Ghi thanh toán hoặc nhận phòng là hết giữ.'
+                : 'Không cọc thì không giữ: khách trả khi nhận phòng.'}
+            </p>
           </div>
         </Sec>
 
@@ -177,8 +236,8 @@ export default function BookingSitePage() {
               <div className="pv-r">Tạm ngưng nhận đặt phòng</div>
             )}
             <div className="pv-f">
-              {f.deposit
-                ? `Cọc ${f.deposit}% qua chuyển khoản, giữ phòng ${f.hold}.`
+              {f.deposit_percent
+                ? `Cọc ${f.deposit_percent}% qua chuyển khoản, giữ phòng ${HOLDS.find(([v]) => v === f.hold_minutes)?.[1]}.`
                 : 'Không cần cọc. Thanh toán khi nhận phòng.'}
             </div>
           </div>
@@ -187,16 +246,8 @@ export default function BookingSitePage() {
       </main>
 
       <div className="footer-bar">
-        <button
-          type="button"
-          className="btn btn-primary btn-block"
-          disabled={!dirty || !shown.length}
-          onClick={() => {
-            saveSite(place.id, f)
-            toast('Đã cập nhật trang đặt phòng')
-          }}
-        >
-          {dirty ? 'Lưu thay đổi' : 'Đã lưu'}
+        <button type="button" className="btn btn-primary btn-block" disabled={!dirty || busy} onClick={submit}>
+          {busy ? 'Đang lưu…' : dirty ? 'Lưu thay đổi' : 'Đã lưu'}
         </button>
       </div>
     </Screen>

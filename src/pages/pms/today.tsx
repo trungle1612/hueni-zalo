@@ -16,6 +16,7 @@ import {
   failingFeeds,
   fmtDay,
   guestLabel,
+  holdUntil,
   isOpen,
   isStaying,
   lateDays,
@@ -109,7 +110,7 @@ export default function TodayPage() {
             b.guests && `${b.guests} khách`,
             b.source === 'ical' ? b.guest_name && sourceLabel(b) : b.origin,
             lateDays(b) > 0 && `trễ ${lateDays(b)} ngày`,
-            b.status === 'hold' ? 'giữ chỗ' : awaitingDeposit(b, room) && 'chưa cọc',
+            b.status === 'hold' ? 'giữ chỗ' : holdUntil(b) || (awaitingDeposit(b, room) && 'chưa cọc'),
           ]
         : [overdueDays(b) > 0 ? whenLabel(b) : `Ở từ ${fmtDay(b.start_date)}`, b.guests && `${b.guests} khách`]
     const canAct = !tomorrow && !done && (kind === 'in' ? canCheckIn(b) : isStaying(b))

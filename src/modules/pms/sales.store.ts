@@ -22,16 +22,23 @@ export type Group = {
   due?: number
 }
 
+// Trang đặt phòng riêng (hueni-api#172), as PATCH /places/:id/booking_site takes it.
 export type Site = {
   open: boolean
-  deposit: 0 | 30 | 50 | 100
-  hidden: string[] // room kinds not offered online
-  hold: string
-  cutoff: string
+  deposit_percent: 0 | 30 | 50 | 100
+  hidden_room_types: string[] // ROOM_TYPE keys not offered online; rooms without a type never are
+  hold_minutes: 15 | 30 | 120 // the room is held this long for the deposit
+  cutoff_hour: 18 | 20 | 22 // last hour to book for tonight
 }
 
 export const GROUP_ORIGINS = ['Công ty lữ hành', 'Điện thoại / Zalo', 'Trực tiếp']
-export const SITE_DEFAULT: Site = { open: true, deposit: 30, hidden: [], hold: '30 phút', cutoff: '20:00' }
+export const SITE_DEFAULT: Site = {
+  open: false,
+  deposit_percent: 30,
+  hidden_room_types: [],
+  hold_minutes: 30,
+  cutoff_hour: 20,
+}
 
 type State = {
   groups: Group[]
