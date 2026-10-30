@@ -8,7 +8,6 @@ const MOCK_ONLY = [
   '/registration', // #29 Khai báo lưu trú
   '/booking-site', // #32 Trang đặt phòng trực tiếp
   '/messages', // #31 Tin nhắn tự động
-  '/rates', // #23 Loại phòng và giá (seasons, surcharges, policy)
   'folio-documents', // #30, #31 Phiếu thu gửi Zalo, hoá đơn điện tử
 ]
 

@@ -182,6 +182,13 @@ export const totalOf = (b: Booking, room?: Room) =>
   detail(b) ? b.total || 0 : roomTotalOf(b, room) + (b.source === 'ical' ? 0 : chargesOf(b) - (b.discount?.amount || 0))
 export const hasWeekendPrice = (b: Booking, room?: Room) =>
   nightDates(b).some((d) => priceOn(b, room, d) !== nightPrice(b, room))
+// "2 đêm × 500.000đ", "3 đêm · T6–T7 giá riêng", or just "8 đêm" when the server's room total holds what the
+// quote alone doesn't explain: seasons, Ở dài ngày (hueni-api#163), or a price staff don't see.
+export const nightsLabel = (b: Booking, room?: Room) => {
+  const n = `${nights(b)} đêm`
+  if (roomTotalOf(b, room) !== nightDates(b).reduce((sum, d) => sum + priceOn(b, room, d), 0)) return n
+  return hasWeekendPrice(b, room) ? `${n} · T6–T7 giá riêng` : `${n} × ${money(nightPrice(b, room))}`
+}
 export const paidOf = (b: Booking, room?: Room) =>
   b.source === 'ical' ? totalOf(b, room) : (b.payments || []).reduce((n, p) => n + p.amount, 0)
 export const dueOf = (b: Booking, room?: Room) =>

@@ -35,13 +35,12 @@ import {
   fmtRange,
   fmtTime,
   guestLabel,
-  hasWeekendPrice,
   isEditable,
   isRoomFree,
   isStaying,
   money,
-  nightPrice,
   nights,
+  nightsLabel,
   occupiedUntil,
   overdueDays,
   paidOf,
@@ -242,15 +241,7 @@ export default function BookingPage() {
         <Sec title="Thanh toán">
           <div className="panel">
             <dl>
-              <KV
-                label={
-                  hasWeekendPrice(b, room)
-                    ? `${nights(b)} đêm · T6–T7 giá riêng`
-                    : `${nights(b)} đêm × ${money(nightPrice(b, room))}`
-                }
-              >
-                {money(roomTotalOf(b, room))}
-              </KV>
+              <KV label={nightsLabel(b, room)}>{money(roomTotalOf(b, room))}</KV>
               {manual && chargesOf(b) > 0 && <KV label="Dịch vụ">{money(chargesOf(b))}</KV>}
               {manual && b.discount && <KV label="Giảm giá">{money(-b.discount.amount)}</KV>}
               {manual ? (

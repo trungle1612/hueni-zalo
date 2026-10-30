@@ -3,12 +3,13 @@ import { create } from 'zustand'
 
 import { day, PayMethod, Perm, Role } from './pms.store'
 
-// Owner setup that hueni-api doesn't model yet: seasons, rules, the owner's audit trail. Staff and refund
-// requests are the server's with API_URL (#28, see remote.ts); the mock ones here are for `vite dev`.
+// Owner setup mock for `vite dev`: seasons, surcharges, rules (#23), staff and refund requests (#28) are the
+// server's with API_URL (see remote.ts). The owner's audit trail is still mock only.
 // ponytail: in-memory mock like pms.store; each piece becomes an endpoint when the API grows one.
 
 export type Season = { id: number; name: string; from: string; to: string; pct: number } // `to` inclusive
 export type Policy = 'flex' | 'mid' | 'strict'
+export type Surcharge = { id: number; name: string; price: number; unit?: string } // price 0 = Miễn phí
 
 // hueni-api Member: id is the membership's. invited = has not linked Zalo yet.
 export type Staff = {
@@ -56,20 +57,8 @@ export const POLICY: Record<Policy, [string, string]> = {
   mid: ['Vừa phải', 'Huỷ miễn phí trước 3 ngày. Sau đó mất cọc. Không đến: tính 1 đêm.'],
   strict: ['Không hoàn', 'Không hoàn cọc dù huỷ lúc nào. Nên kèm giá thấp hơn.'],
 }
-export const SURCHARGES: [string, string][] = [
-  ['Người lớn thêm', '150.000đ / đêm'],
-  ['Trẻ 6 – 11 tuổi', '75.000đ / đêm'],
-  ['Trẻ dưới 6 tuổi', 'Miễn phí'],
-]
-export const SERVICES: [string, string][] = [
-  ['Nước suối', '15.000đ / chai'],
-  ['Giặt ủi', '30.000đ / kg'],
-  ['Thuê xe máy', '150.000đ / ngày'],
-  ['Nhận phòng sớm trước 12:00', '100.000đ'],
-  ['Trả phòng muộn đến 15:00', '150.000đ'],
-]
-
-// Highest season markup covering a date (overlapping seasons take the higher one).
+// Highest season markup covering a date (overlapping seasons take the higher one). For the Xem thử giá
+// preview only: bookings are priced by hueni-api (#163), which keeps each night's % from when it was booked.
 export const seasonOn = (seasons: Season[], date: string) =>
   seasons.filter((s) => s.from <= date && date <= s.to).sort((a, b) => b.pct - a.pct)[0]
 
@@ -78,6 +67,7 @@ const ago = (h: number) => dayjs().subtract(h, 'hour').toISOString()
 
 type State = {
   seasons: Season[]
+  surcharges: Surcharge[]
   longStay: boolean
   policy: Policy
   staff: Staff[]
@@ -90,6 +80,11 @@ export const useSetup = create<State>(() => ({
     { id: 1, name: 'Tết Nguyên đán', from: `${year}-02-04`, to: `${year}-02-12`, pct: 50 },
     { id: 2, name: 'Lễ 30/4 – 1/5', from: `${year}-04-29`, to: `${year}-05-03`, pct: 30 },
     { id: 3, name: 'Mùa hè', from: `${year}-06-01`, to: `${year}-08-31`, pct: 15 },
+  ],
+  surcharges: [
+    { id: 1, name: 'Người lớn thêm', price: 150000, unit: 'đêm' },
+    { id: 2, name: 'Trẻ 6 – 11 tuổi', price: 75000, unit: 'đêm' },
+    { id: 3, name: 'Trẻ dưới 6 tuổi', price: 0, unit: 'đêm' },
   ],
   longStay: true,
   policy: 'mid',

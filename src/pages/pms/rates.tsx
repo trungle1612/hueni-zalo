@@ -17,9 +17,10 @@ import {
   toast,
   useCurrent,
 } from '@/modules/pms/components/ui'
+import { SERVICES } from '@/modules/pms/guests.store'
 import { can, fmtDay, money, Room, today, upcomingOn, usePms } from '@/modules/pms/pms.store'
-import { saveRoom } from '@/modules/pms/remote'
-import { audit, POLICY, Policy, Season, seasonOn, SERVICES, SURCHARGES, useSetup } from '@/modules/pms/setup.store'
+import { saveRoom, usePlaceList, useRules, useServices } from '@/modules/pms/remote'
+import { audit, POLICY, Policy, Season, seasonOn, Surcharge, useSetup } from '@/modules/pms/setup.store'
 
 type Type = { name: string; rooms: Room[]; guests: number; base: number; wknd?: number; mixed: boolean }
 const dmy = (iso: string) => dayjs(iso).format('DD/MM/YYYY')
@@ -79,8 +80,9 @@ export default function RatesPage() {
 function Types() {
   const types = useTypes()
   const { bookings, actions } = usePms()
-  const seasons = useSetup((s) => s.seasons)
-  const longStay = useSetup((s) => s.longStay)
+  const { place } = useCurrent()
+  const seasons = usePlaceList(place.id, 'seasons').list
+  const { longStay } = useRules(place.id)
   const [edit, setEdit] = useState<Type>()
   const [base, setBase] = useState<number>()
   const [wknd, setWknd] = useState<number>()
@@ -138,7 +140,6 @@ function Types() {
     )
   }
 
-  // ponytail: seasons only show in this preview; bookings price them once hueni-api does (priceOn ignores them).
   const t = types[pvType] || types[0]
   const nightly = t ? (isWeekend(pvDate) && t.wknd ? t.wknd : t.base) : 0
   const season = seasonOn(seasons, pvDate)
@@ -245,29 +246,31 @@ function Types() {
   )
 }
 
+// Save from a sheet: the server's sentence on failure, else close and confirm.
+function useSaving(close: () => void) {
+  const [busy, setBusy] = useState(false)
+  const run = async (action: () => Promise<string | void>, done: string) => {
+    setBusy(true)
+    const error = await action()
+    setBusy(false)
+    if (error) return toast(error)
+    close()
+    toast(done)
+  }
+  return [busy, run] as const
+}
+
 function Seasons() {
-  const seasons = useSetup((s) => s.seasons)
+  const { place } = useCurrent()
+  const { list: seasons, save, remove } = usePlaceList(place.id, 'seasons')
   const [edit, setEdit] = useState<Partial<Season> | null>(null)
+  const [busy, run] = useSaving(() => setEdit(null))
   const f = edit || {}
   const dateBad = !!f.from && !!f.to && f.to < f.from
   const overlap = f.from && f.to && seasons.find((x) => x.id !== f.id && !(f.to! < x.from || f.from! > x.to))
   const ready = !!f.name?.trim() && !!f.from && !!f.to && !dateBad && !!f.pct
 
-  function put(list: Season[], text: string) {
-    const prev = seasons
-    useSetup.setState({ seasons: [...list].sort((a, b) => a.from.localeCompare(b.from)) })
-    setEdit(null)
-    toast(text, () => useSetup.setState({ seasons: prev }))
-  }
-  function save() {
-    const rec = { ...f, name: f.name!.trim() } as Season
-    if (rec.id)
-      put(
-        seasons.map((x) => (x.id === rec.id ? rec : x)),
-        `Đã lưu ${rec.name}`,
-      )
-    else put([...seasons, { ...rec, id: Math.max(0, ...seasons.map((x) => x.id)) + 1 }], `Đã thêm ${rec.name}`)
-  }
+  const name = f.name?.trim() || ''
 
   return (
     <Sec
@@ -295,7 +298,7 @@ function Seasons() {
         )}
       </div>
       <p className="help" style={{ marginTop: 8 }}>
-        Hai mùa trùng ngày thì lấy mức cao hơn.
+        Hai mùa trùng ngày thì lấy mức cao hơn. Thêm, sửa, xoá mùa không đổi giá đặt phòng đã có.
       </p>
 
       {edit && (
@@ -305,6 +308,7 @@ function Seasons() {
               <input
                 {...p}
                 type="text"
+                maxLength={50}
                 placeholder="Ví dụ: Tết Nguyên đán"
                 value={f.name || ''}
                 onChange={(e) => setEdit({ ...f, name: e.target.value })}
@@ -312,7 +316,7 @@ function Seasons() {
             )}
           </Field>
           <div className="grid2">
-            <Field label="Từ ngày">
+            <Field label="Từ đêm">
               {(p) => (
                 <input
                   {...p}
@@ -322,7 +326,7 @@ function Seasons() {
                 />
               )}
             </Field>
-            <Field label="Đến ngày" error={dateBad && 'Ngày kết thúc phải sau ngày bắt đầu.'}>
+            <Field label="Đến đêm" error={dateBad && 'Đến ngày phải từ ngày bắt đầu trở đi.'}>
               {(p) => (
                 <input {...p} type="date" value={f.to || ''} onChange={(e) => setEdit({ ...f, to: e.target.value })} />
               )}
@@ -347,19 +351,25 @@ function Seasons() {
               Trùng ngày với “{overlap.name}”. Những ngày trùng lấy mức cao hơn.
             </div>
           )}
-          <button type="button" className="btn btn-primary btn-block" disabled={!ready} onClick={save}>
+          <button
+            type="button"
+            className="btn btn-primary btn-block"
+            disabled={!ready || busy}
+            onClick={() =>
+              run(
+                () => save({ id: f.id, name, from: f.from!, to: f.to!, pct: f.pct! }),
+                f.id ? `Đã lưu ${name}` : `Đã thêm ${name}`,
+              )
+            }
+          >
             Lưu
           </button>
           {f.id && (
             <button
               type="button"
               className="btn btn-danger btn-block"
-              onClick={() =>
-                put(
-                  seasons.filter((x) => x.id !== f.id),
-                  `Đã xoá ${f.name}`,
-                )
-              }
+              disabled={busy}
+              onClick={() => run(() => remove(f.id!), `Đã xoá ${f.name}`)}
             >
               Xoá mùa này
             </button>
@@ -373,35 +383,66 @@ function Seasons() {
   )
 }
 
+const perUnit = (x: { price: number; unit?: string }) =>
+  x.price ? `${money(x.price)}${x.unit ? ` / ${x.unit}` : ''}` : 'Miễn phí'
+
 function Rules() {
-  const { longStay, policy } = useSetup()
+  const { place } = useCurrent()
+  const rules = useRules(place.id)
+  const { list: surcharges, save, remove } = usePlaceList(place.id, 'surcharges')
+  const services = useServices(place.id, SERVICES)
+  const [edit, setEdit] = useState<Partial<Surcharge> | null>(null)
+  const [busy, run] = useSaving(() => setEdit(null))
+  const f = edit || {}
+  const name = f.name?.trim() || ''
+
+  async function setRule(p: { long_stay?: boolean; cancel_policy?: Policy }) {
+    const error = await rules.save(p)
+    if (error) toast(error)
+  }
+
   return (
     <>
-      <Sec title="Phụ thu theo khách">
-        <dl className="panel">
-          {SURCHARGES.map(([k, v]) => (
-            <KV key={k} label={k}>
-              {v}
-            </KV>
+      <Sec
+        title="Phụ thu theo khách"
+        aside={
+          <button type="button" className="link" onClick={() => setEdit({ unit: 'đêm' })}>
+            + Thêm
+          </button>
+        }
+      >
+        <div className="panel">
+          {surcharges.map((x) => (
+            <button key={x.id} type="button" className="row" onClick={() => setEdit(x)}>
+              <span className="grow">
+                <span className="t1">{x.name}</span>
+              </span>
+              <span className="t2">{perUnit(x)}</span>
+            </button>
           ))}
-        </dl>
+          {!surcharges.length && <div className="empty-row">Chưa có phụ thu.</div>}
+        </div>
+        <p className="help" style={{ marginTop: 8 }}>
+          Chỉ để báo cho khách, không tự cộng vào tiền phòng. Thu thì thêm dịch vụ vào đặt phòng.
+        </p>
       </Sec>
       <Sec title="Ở dài ngày">
         <div className="panel form">
           <div className="switch-row">
             <div>
               <div style={{ fontWeight: 600 }} id="long-stay">
-                Giảm 10% từ đêm thứ 7
+                Ở từ 7 đêm giảm 10% tiền phòng
               </div>
-              <p className="help">Áp tự động khi tạo đặt phòng</p>
+              <p className="help">Áp tự động cho đặt phòng tạo sau khi bật</p>
             </div>
             <button
               type="button"
               className="switch"
               role="switch"
-              aria-checked={longStay}
+              aria-checked={!!rules.longStay}
               aria-labelledby="long-stay"
-              onClick={() => useSetup.setState({ longStay: !longStay })}
+              disabled={rules.longStay === undefined}
+              onClick={() => setRule({ long_stay: !rules.longStay })}
             >
               <span />
             </button>
@@ -409,25 +450,96 @@ function Rules() {
         </div>
       </Sec>
       <Sec title="Chính sách huỷ">
-        <Segmented
-          label="Chính sách huỷ"
-          value={policy}
-          options={(Object.keys(POLICY) as Policy[]).map((k) => [k, POLICY[k][0]])}
-          onChange={(v) => useSetup.setState({ policy: v })}
-        />
-        <p className="help" style={{ marginTop: 8 }}>
-          {POLICY[policy][1]} Hiện trên trang đặt phòng và tin nhắn xác nhận.
-        </p>
+        {rules.policy && (
+          <>
+            <Segmented
+              label="Chính sách huỷ"
+              value={rules.policy}
+              options={(Object.keys(POLICY) as Policy[]).map((k) => [k, POLICY[k][0]])}
+              onChange={(v) => setRule({ cancel_policy: v })}
+            />
+            <p className="help" style={{ marginTop: 8 }}>
+              {rules.text || POLICY[rules.policy][1]} Hiện cho khách xem, không đổi số tiền hoàn khi huỷ.
+            </p>
+          </>
+        )}
       </Sec>
       <Sec title="Dịch vụ tính thêm">
         <dl className="panel">
-          {SERVICES.map(([k, v]) => (
-            <KV key={k} label={k}>
-              {v}
+          {services.map((x) => (
+            <KV key={x.id} label={x.name}>
+              {perUnit(x)}
             </KV>
           ))}
         </dl>
       </Sec>
+
+      {edit && (
+        <Sheet title={f.id ? f.name : 'Thêm phụ thu'} onClose={() => setEdit(null)}>
+          <Field label="Tên">
+            {(p) => (
+              <input
+                {...p}
+                type="text"
+                maxLength={50}
+                placeholder="Ví dụ: Người lớn thêm"
+                value={f.name || ''}
+                onChange={(e) => setEdit({ ...f, name: e.target.value })}
+              />
+            )}
+          </Field>
+          <div className="grid2">
+            <Field label="Giá (đ)" optional>
+              {(p) => (
+                <MoneyInput
+                  {...p}
+                  placeholder="0 = Miễn phí"
+                  value={f.price}
+                  onChange={(v) => setEdit({ ...f, price: v })}
+                />
+              )}
+            </Field>
+            <Field label="Tính theo" optional>
+              {(p) => (
+                <input
+                  {...p}
+                  type="text"
+                  maxLength={20}
+                  placeholder="đêm"
+                  value={f.unit || ''}
+                  onChange={(e) => setEdit({ ...f, unit: e.target.value })}
+                />
+              )}
+            </Field>
+          </div>
+          <button
+            type="button"
+            className="btn btn-primary btn-block"
+            disabled={!name || busy}
+            onClick={() =>
+              run(
+                () => save({ id: f.id, name, price: f.price || 0, unit: f.unit?.trim() || undefined }),
+                f.id ? `Đã lưu ${name}` : `Đã thêm ${name}`,
+              )
+            }
+          >
+            Lưu
+          </button>
+          {f.id && (
+            <button
+              type="button"
+              className="btn btn-danger btn-block"
+              disabled={busy}
+              onClick={() => run(() => remove(f.id!), `Đã xoá ${f.name}`)}
+            >
+              Xoá phụ thu này
+            </button>
+          )}
+          <button type="button" className="btn btn-ghost btn-block" onClick={() => setEdit(null)}>
+            Đóng
+          </button>
+        </Sheet>
+      )}
     </>
   )
 }
