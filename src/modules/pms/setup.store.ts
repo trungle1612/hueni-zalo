@@ -1,26 +1,36 @@
 import dayjs from 'dayjs'
 import { create } from 'zustand'
 
-import { day } from './pms.store'
+import { day, PayMethod, Perm, Role } from './pms.store'
 
-// Owner setup that hueni-api doesn't model yet: seasons, rules, staff, the owner's audit trail.
+// Owner setup that hueni-api doesn't model yet: seasons, rules, the owner's audit trail. Staff and refund
+// requests are the server's with API_URL (#28, see remote.ts); the mock ones here are for `vite dev`.
 // ponytail: in-memory mock like pms.store; each piece becomes an endpoint when the API grows one.
 
 export type Season = { id: number; name: string; from: string; to: string; pct: number } // `to` inclusive
 export type Policy = 'flex' | 'mid' | 'strict'
 
-// ponytail: PRODUCT roles are owner/staff; Quản lý and Buồng phòng are design mocks until hueni-api has them.
-export type StaffRole = 'owner' | 'mgr' | 'fd' | 'hk'
-export type Perm = 'disc' | 'refund' | 'report' | 'rate'
+// hueni-api Member: id is the membership's. invited = has not linked Zalo yet.
 export type Staff = {
   id: number
+  user_id: number
   name: string
   phone: string
-  role: StaffRole
-  sub: string
-  perms: Partial<Record<Perm, boolean>>
-  invited?: boolean
-  locked?: boolean
+  role: Role
+  permissions: Perm[]
+  locked: boolean
+  invited: boolean
+  last_active_at?: string
+}
+// Chờ duyệt: a refund asked by staff without the refund right.
+export type RefundRequest = {
+  id: number
+  amount: number
+  payment_method: PayMethod
+  note?: string
+  at: string
+  by?: string
+  booking: { id: number; code: string; label: string; room_name: string; paid: number }
 }
 
 export type AuditKind = 'money' | 'cancel' | 'price' | 'other'
@@ -35,17 +45,11 @@ export type AuditEntry = {
   at: string
 }
 
-export const ROLE_NAME: Record<StaffRole, string> = {
-  owner: 'Chủ cơ sở',
-  mgr: 'Quản lý',
-  fd: 'Lễ tân',
-  hk: 'Buồng phòng',
-}
+export const ROLE_NAME: Record<Role, string> = { owner: 'Chủ cơ sở', staff: 'Nhân viên' }
 export const PERMS: [Perm, string, string][] = [
-  ['disc', 'Giảm giá đến 10%', 'Cao hơn cần chủ duyệt'],
-  ['refund', 'Hoàn cọc không cần duyệt', ''],
+  ['discount', 'Giảm giá đến 10%', 'Cao hơn cần chủ cơ sở'],
+  ['refund', 'Hoàn tiền không cần duyệt', 'Không có: gửi yêu cầu để chủ duyệt'],
   ['report', 'Xem báo cáo doanh thu', ''],
-  ['rate', 'Sửa giá và mùa', ''],
 ]
 export const POLICY: Record<Policy, [string, string]> = {
   flex: ['Linh hoạt', 'Huỷ miễn phí trước 24 giờ. Sau đó mất cọc.'],
@@ -78,7 +82,7 @@ type State = {
   policy: Policy
   staff: Staff[]
   audit: AuditEntry[]
-  refundRequest?: { booking: string; amount: number; who: string; text: string }
+  refundRequests: RefundRequest[]
 }
 
 export const useSetup = create<State>(() => ({
@@ -90,17 +94,49 @@ export const useSetup = create<State>(() => ({
   longStay: true,
   policy: 'mid',
   staff: [
-    { id: 1, name: 'Chị Hoa', phone: '0903111222', role: 'owner', sub: 'Chủ cơ sở · bạn', perms: {} },
+    {
+      id: 1,
+      user_id: 1,
+      name: 'Chị Hoa',
+      phone: '0903111222',
+      role: 'owner',
+      permissions: ['discount', 'refund', 'report'],
+      locked: false,
+      invited: false,
+      last_active_at: ago(0),
+    },
     {
       id: 2,
+      user_id: 2,
       name: 'Em Hằng',
       phone: '0912448210',
-      role: 'fd',
-      sub: 'Ca sáng · hoạt động 5 phút trước',
-      perms: { disc: true },
+      role: 'staff',
+      permissions: ['discount'],
+      locked: false,
+      invited: false,
+      last_active_at: ago(1),
     },
-    { id: 3, name: 'Anh Tùng', phone: '0935222333', role: 'fd', sub: 'Ca tối · hoạt động hôm qua 23:10', perms: {} },
-    { id: 4, name: 'Chị Sáu', phone: '0978444555', role: 'hk', sub: 'Chỉ thấy việc dọn phòng', perms: {} },
+    {
+      id: 3,
+      user_id: 3,
+      name: 'Anh Tùng',
+      phone: '0935222333',
+      role: 'staff',
+      permissions: [],
+      locked: false,
+      invited: false,
+      last_active_at: ago(15),
+    },
+    {
+      id: 4,
+      user_id: 4,
+      name: 'Chị Sáu',
+      phone: '0978444555',
+      role: 'staff',
+      permissions: [],
+      locked: false,
+      invited: true,
+    },
   ],
   audit: [
     {
@@ -125,12 +161,23 @@ export const useSetup = create<State>(() => ({
     },
     { id: 3, k: 'other', action: 'Xem số CCCD · Chị Bình', note: 'Từ hồ sơ khách', who: 'Em Hằng', at: ago(52) },
   ],
-  refundRequest: {
-    booking: 'Anh Dũng',
-    amount: 200000,
-    who: 'Anh Tùng',
-    text: `Anh Tùng huỷ đặt phòng của Anh Dũng (${dayjs(day(2)).format('DD/MM')}). Lý do: khách đổi kế hoạch, báo trước 3 ngày. Đúng chính sách huỷ miễn phí.`,
-  },
+  refundRequests: [
+    {
+      id: 1,
+      amount: 200000,
+      payment_method: 'bank',
+      note: 'Khách đổi kế hoạch, báo trước 3 ngày',
+      at: ago(2),
+      by: 'Anh Tùng',
+      booking: {
+        id: 0,
+        code: 'HN-0001',
+        label: `Anh Dũng · ${dayjs(day(2)).format('DD/MM')}`,
+        room_name: '102',
+        paid: 200000,
+      },
+    },
+  ],
 }))
 
 export const audit = (e: Omit<AuditEntry, 'id' | 'at'>) =>
