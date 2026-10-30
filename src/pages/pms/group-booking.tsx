@@ -10,6 +10,7 @@ import {
   Badge,
   Field,
   KV,
+  MoneyInput,
   phoneDigits,
   Screen,
   Sec,
@@ -32,6 +33,8 @@ import {
   money,
   nights,
   paidOf,
+  PAY_METHOD,
+  PayMethod,
   Room,
   today,
   totalOf,
@@ -243,6 +246,64 @@ function NewGroup() {
   )
 }
 
+// Thu tiền cho đoàn, like Thu tiền on a booking (folio.tsx PaySheet). The server splits it over the rooms.
+function GroupPaySheet({
+  group,
+  due,
+  billed,
+  onClose,
+}: {
+  group: Group
+  due: number
+  billed: { id: number; due: number }[]
+  onClose: () => void
+}) {
+  const record = useRecord()
+  const [amount, setAmount] = useState<number | undefined>(due)
+  const [method, setMethod] = useState<PayMethod>('bank')
+  const [note, setNote] = useState('')
+  return (
+    <Sheet title={`Thu ${money(due)}`} onClose={onClose}>
+      <Segmented
+        label="Hình thức"
+        value={method}
+        onChange={setMethod}
+        options={Object.entries(PAY_METHOD) as [PayMethod, string][]}
+      />
+      <Field label="Số tiền (đ)" help="Có thể thu một phần.">
+        {(p) => <MoneyInput {...p} value={amount} onChange={setAmount} />}
+      </Field>
+      <Field label="Ghi chú" optional>
+        {(p) => (
+          <input
+            {...p}
+            value={note}
+            placeholder={`Thu theo đoàn ${group.code}`}
+            onChange={(e) => setNote(e.target.value)}
+          />
+        )}
+      </Field>
+      <button
+        type="button"
+        className="btn btn-primary btn-block"
+        disabled={!amount}
+        onClick={async () => {
+          const error = await record(
+            () => groups.pay(group.id, amount!, method, note.trim(), billed),
+            `Đã ghi nhận ${money(amount!)}`,
+          )
+          if (!error) onClose()
+        }}
+      >
+        Đã nhận {money(amount || 0)}
+      </button>
+      <button type="button" className="btn btn-ghost btn-block" onClick={onClose}>
+        Đóng
+      </button>
+    </Sheet>
+  )
+}
+
 function GroupView({ group }: { group: Group }) {
   const { bookings, rooms: allRooms } = usePms()
   const { rooms } = useCurrent()
@@ -250,6 +311,7 @@ function GroupView({ group }: { group: Group }) {
   const [sheet, setSheet] = useState<number | 'add'>()
   const [sel, setSel] = useState<number>()
   const [own, setOwn] = useState(false)
+  const [paying, setPaying] = useState(false)
   const reload = () => groups.load(group.id)
 
   const mine = bookings
@@ -407,6 +469,11 @@ function GroupView({ group }: { group: Group }) {
               {money(due)}
             </KV>
           </dl>
+          {group.bill === 'one' && due > 0 && (
+            <button type="button" className="btn btn-block" style={{ marginTop: 8 }} onClick={() => setPaying(true)}>
+              Thu tiền cho đoàn
+            </button>
+          )}
         </Sec>
         <div className="end" />
       </main>
@@ -431,6 +498,17 @@ function GroupView({ group }: { group: Group }) {
               : `Nhận phòng từ ${fmtRange(first).slice(0, 5)}`}
         </button>
       </div>
+
+      {paying && (
+        <GroupPaySheet
+          group={group}
+          due={due}
+          billed={billed
+            .map((b) => ({ id: b.id, due: dueOf(b, roomOf(b)), name: roomOf(b)?.name || '' }))
+            .sort((a, b) => a.name.localeCompare(b.name))}
+          onClose={() => setPaying(false)}
+        />
+      )}
 
       {sheet !== undefined && (
         <Sheet title={editing ? `Phòng ${editRoom?.name}` : 'Thêm phòng cho đoàn'} onClose={() => setSheet(undefined)}>

@@ -497,6 +497,28 @@ export const groups = {
     useSales.getState().setGroup(groupId, { bill })
   },
 
+  // Thu tiền cho đoàn (one bill): the server splits it over the billed rooms' due, in room-name order.
+  // billed: those rooms and their due, in that order, for the mock.
+  pay: async (
+    groupId: number,
+    amount: number,
+    method: PayMethod,
+    note: string,
+    billed: { id: number; due: number }[],
+  ): Promise<Result> => {
+    if (API_URL)
+      return groupResult(`/groups/${groupId}/payments`, 'POST', {
+        payment: { amount, payment_method: method, note: note || undefined },
+      })
+    let left = amount
+    if (amount > billed.reduce((n, b) => n + b.due, 0)) return 'Số tiền lớn hơn số còn phải thu của đoàn.'
+    for (const b of billed) {
+      const part = Math.min(left, b.due)
+      if (part > 0) mock().pay(b.id, part, method)
+      left -= part
+    }
+  },
+
   // Nhận phòng cả đoàn: every room still to arrive, or none.
   checkIn: async (groupId: number, waiting: Booking[]): Promise<Result> => {
     if (API_URL) return groupResult(`/groups/${groupId}/check_in`)
