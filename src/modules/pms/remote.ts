@@ -20,7 +20,7 @@ import {
   usePms,
 } from './pms.store'
 import { addGroupRooms, createGroup, Group, useSales } from './sales.store'
-import { RefundRequest, Staff, useSetup } from './setup.store'
+import { Policy, RefundRequest, Season, Staff, Surcharge, useSetup } from './setup.store'
 
 // Booking and front-desk actions for the screens connected to hueni-api (#34, #35, wiki Mini-App-API).
 // With API_URL every action is a request and the server's answer replaces the local copy; without it
@@ -863,5 +863,89 @@ export async function requestRefund(bookingId: number, amount: number, method: P
     })
   } catch (e) {
     return message(e)
+  }
+}
+
+// ---------- giá (#23, hueni-api#163): owner-only writes, the API prices the bookings ----------
+
+type Row = { id: number }
+type Lists = { seasons: Season; surcharges: Surcharge }
+
+// Mùa and Phụ thu theo khách: one list per homestay, same endpoints (GET / POST on the homestay,
+// PATCH / DELETE on the row). The server sorts and checks; each change reloads the list.
+export function usePlaceList<K extends keyof Lists>(placeId: number, name: K) {
+  type T = Lists[K]
+  const mock = useSetup((s) => s[name]) as T[]
+  const [server, setServer] = useState<T[]>([])
+  const load = useCallback(
+    () => api<Record<K, T[]>>(`/places/${placeId}/${name}`).then((r) => setServer(r[name].map((x) => strip<T>(x)))),
+    [placeId, name],
+  )
+  useEffect(() => {
+    if (API_URL) load().catch(() => {})
+  }, [load])
+  const setMock = (list: T[]) => useSetup.setState({ [name]: list })
+
+  return {
+    list: API_URL ? server : mock,
+    save: async ({ id, ...row }: Omit<T, 'id'> & Partial<Row>): Promise<Result> => {
+      if (!API_URL)
+        return setMock(
+          id
+            ? mock.map((x) => (x.id === id ? ({ ...row, id } as T) : x))
+            : [...mock, { ...row, id: Math.max(0, ...mock.map((x) => x.id)) + 1 } as T],
+        )
+      try {
+        await api(id ? `/${name}/${id}` : `/places/${placeId}/${name}`, {
+          method: id ? 'PATCH' : 'POST',
+          body: { [name.slice(0, -1)]: row },
+        })
+        await load()
+      } catch (e) {
+        return message(e)
+      }
+    },
+    remove: async (id: number): Promise<Result> => {
+      if (!API_URL) return setMock(mock.filter((x) => x.id !== id))
+      try {
+        await api(`/${name}/${id}`, { method: 'DELETE' })
+        await load()
+      } catch (e) {
+        return message(e)
+      }
+    },
+  }
+}
+
+type ApiRules = { long_stay: boolean; cancel_policy: { key: Policy; text: string } }
+
+// Ở dài ngày (7 đêm trở lên giảm 10%, new bookings only) and Chính sách huỷ (shown to guests; refunds stay manual).
+export function useRules(placeId: number) {
+  const mock = useSetup()
+  const [server, setServer] = useState<ApiRules>()
+  useEffect(() => {
+    if (API_URL)
+      api<ApiRules>(`/places/${placeId}`)
+        .then(setServer)
+        .catch(() => {})
+  }, [placeId])
+  if (!API_URL)
+    return {
+      longStay: mock.longStay,
+      policy: mock.policy,
+      save: async (p: { long_stay?: boolean; cancel_policy?: Policy }): Promise<Result> =>
+        useSetup.setState({ longStay: p.long_stay ?? mock.longStay, policy: p.cancel_policy ?? mock.policy }),
+    }
+  return {
+    longStay: server?.long_stay,
+    policy: server?.cancel_policy.key,
+    text: server?.cancel_policy.text,
+    save: async (p: { long_stay?: boolean; cancel_policy?: Policy }): Promise<Result> => {
+      try {
+        setServer(await api<ApiRules>(`/places/${placeId}/rules`, { method: 'PATCH', body: { place: p } }))
+      } catch (e) {
+        return message(e)
+      }
+    },
   }
 }

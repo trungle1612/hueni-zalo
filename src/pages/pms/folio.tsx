@@ -29,10 +29,8 @@ import {
   fmtRange,
   fmtTime,
   guestLabel,
-  hasWeekendPrice,
   money,
-  nightPrice,
-  nights,
+  nightsLabel,
   paidOf,
   PAY_METHOD,
   PayMethod,
@@ -124,11 +122,7 @@ export default function FolioPage() {
             <div className="row">
               <span className="grow">
                 <span className="t1">Tiền phòng</span>
-                <span className="t2">
-                  {hasWeekendPrice(b, room)
-                    ? `${nights(b)} đêm · T6–T7 giá riêng`
-                    : `${nights(b)} đêm × ${money(nightPrice(b, room))}`}
-                </span>
+                <span className="t2">{nightsLabel(b, room)}</span>
               </span>
               <span className="amt">{money(roomTotalOf(b, room))}</span>
             </div>
