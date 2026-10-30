@@ -8,7 +8,6 @@ const MOCK_ONLY = [
   '/registration', // #29 Khai báo lưu trú
   '/shift', // #27 Giao ca
   '/housekeeping', // #26 Buồng phòng
-  '/guests', // #25 Hồ sơ khách
   '/booking-site', // #32 Trang đặt phòng trực tiếp
   '/messages', // #31 Tin nhắn tự động
   '/rates', // #23 Loại phòng và giá (seasons, surcharges, policy)
