@@ -24,6 +24,7 @@ export type Room = {
   weekend_price?: number // Friday and Saturday nights, when different
   amenities?: string[]
   note?: string // internal, staff only
+  damage_note?: string // Báo hỏng / thiếu đồ, until cleared (hueni-api#166)
   updated_at?: string
 }
 
