@@ -1,6 +1,6 @@
 import './sales.scss'
 
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { useNavigate } from 'zmp-ui'
 
@@ -10,6 +10,7 @@ import {
   Badge,
   Field,
   KV,
+  MoneyInput,
   phoneDigits,
   Screen,
   Sec,
@@ -32,24 +33,31 @@ import {
   money,
   nights,
   paidOf,
+  PAY_METHOD,
+  PayMethod,
   Room,
   today,
   totalOf,
   usePms,
 } from '@/modules/pms/pms.store'
-import { addGroupRooms, createGroup, Group, GROUP_ORIGINS, groupCode, useSales } from '@/modules/pms/sales.store'
+import { groups, remote } from '@/modules/pms/remote'
+import { Group, GROUP_ORIGINS, useSales } from '@/modules/pms/sales.store'
 
 // /groups/new: one form for the group and its rooms. /groups/:id: the group's rooms, bill and check-in.
 export default function GroupBookingPage() {
   const { id } = useParams()
   const group = useSales((s) => s.groups.find((g) => g.id === Number(id)))
+  const [loading, setLoading] = useState(id !== undefined)
+  useEffect(() => {
+    if (id !== undefined) groups.load(Number(id)).finally(() => setLoading(false))
+  }, [id])
   if (id === undefined) return <NewGroup />
   if (!group) {
     return (
       <Screen>
         <AppBar lead="back" title="Đặt phòng theo đoàn" />
         <main className="scroll">
-          <div className="empty">Không tìm thấy đoàn này.</div>
+          <div className="empty">{loading ? 'Đang tải…' : 'Không tìm thấy đoàn này.'}</div>
         </main>
       </Screen>
     )
@@ -57,6 +65,8 @@ export default function GroupBookingPage() {
   return <GroupView group={group} />
 }
 
+// ponytail: free rooms from the loaded bookings (two months), only to narrow the list; hueni-api checks overlaps and
+// names the room (#24). Ask the server for free rooms if far-off dates list rooms that are taken.
 const freeFor = (rooms: Room[], all: Booking[], from: string, to: string, ignore: number[] = []) =>
   rooms.filter((r) => isOpen(r) && !ignore.includes(r.id) && isRoomFree(all, r.id, from, to))
 
@@ -112,15 +122,14 @@ function NewGroup() {
     contact: !f.contact.trim() && 'Nhập tên trưởng đoàn.',
     phone: phoneBad && 'Số điện thoại cần ít nhất 9 chữ số.',
     dates: badDates && 'Ngày trả phòng phải sau ngày nhận phòng.',
-    rooms: chosen.length < 2 && 'Chọn ít nhất 2 phòng. Một phòng thì tạo đặt phòng thường.',
   }
 
-  function save() {
+  async function save() {
     setTried(true)
     if (Object.values(errors).some(Boolean)) return
-    const made = createGroup(
+    const made = await groups.create(
+      place.id,
       {
-        place_id: place.id,
         name: f.name.trim(),
         contact: f.contact.trim(),
         phone: f.phone.trim() || undefined,
@@ -193,7 +202,7 @@ function NewGroup() {
                       type="text"
                       inputMode="numeric"
                       value={f.pct}
-                      onChange={(e) => set({ pct: Math.min(50, Number(e.target.value.replace(/\D/g, '')) || 0) })}
+                      onChange={(e) => set({ pct: Math.min(100, Number(e.target.value.replace(/\D/g, '')) || 0) })}
                     />
                   )}
                 </Field>
@@ -219,7 +228,6 @@ function NewGroup() {
             ) : (
               <div className="notice">Không còn phòng trống cho những ngày này.</div>
             )}
-            {tried && errors.rooms && <div className="error">{errors.rooms}</div>}
             {error && (
               <div className="alert" role="alert">
                 {error}
@@ -238,14 +246,73 @@ function NewGroup() {
   )
 }
 
+// Thu tiền cho đoàn, like Thu tiền on a booking (folio.tsx PaySheet). The server splits it over the rooms.
+function GroupPaySheet({
+  group,
+  due,
+  billed,
+  onClose,
+}: {
+  group: Group
+  due: number
+  billed: { id: number; due: number }[]
+  onClose: () => void
+}) {
+  const record = useRecord()
+  const [amount, setAmount] = useState<number | undefined>(due)
+  const [method, setMethod] = useState<PayMethod>('bank')
+  const [note, setNote] = useState('')
+  return (
+    <Sheet title={`Thu ${money(due)}`} onClose={onClose}>
+      <Segmented
+        label="Hình thức"
+        value={method}
+        onChange={setMethod}
+        options={Object.entries(PAY_METHOD) as [PayMethod, string][]}
+      />
+      <Field label="Số tiền (đ)" help="Có thể thu một phần.">
+        {(p) => <MoneyInput {...p} value={amount} onChange={setAmount} />}
+      </Field>
+      <Field label="Ghi chú" optional>
+        {(p) => (
+          <input
+            {...p}
+            value={note}
+            placeholder={`Thu theo đoàn ${group.code}`}
+            onChange={(e) => setNote(e.target.value)}
+          />
+        )}
+      </Field>
+      <button
+        type="button"
+        className="btn btn-primary btn-block"
+        disabled={!amount}
+        onClick={async () => {
+          const error = await record(
+            () => groups.pay(group.id, amount!, method, note.trim(), billed),
+            `Đã ghi nhận ${money(amount!)}`,
+          )
+          if (!error) onClose()
+        }}
+      >
+        Đã nhận {money(amount || 0)}
+      </button>
+      <button type="button" className="btn btn-ghost btn-block" onClick={onClose}>
+        Đóng
+      </button>
+    </Sheet>
+  )
+}
+
 function GroupView({ group }: { group: Group }) {
-  const { bookings, rooms: allRooms, actions } = usePms()
+  const { bookings, rooms: allRooms } = usePms()
   const { rooms } = useCurrent()
-  const setGroup = useSales((s) => s.setGroup)
   const record = useRecord()
   const [sheet, setSheet] = useState<number | 'add'>()
   const [sel, setSel] = useState<number>()
   const [own, setOwn] = useState(false)
+  const [paying, setPaying] = useState(false)
+  const reload = () => groups.load(group.id)
 
   const mine = bookings
     .filter((b) => b.group_id === group.id && b.status !== 'cancelled')
@@ -256,7 +323,7 @@ function GroupView({ group }: { group: Group }) {
     <AppBar
       lead="back"
       title={group.name}
-      sub={first ? `${groupCode(group)} · ${fmtRange(first)} · ${nights(first)} đêm` : groupCode(group)}
+      sub={first ? `${group.code} · ${fmtRange(first)} · ${nights(first)} đêm` : group.code}
     />
   )
   if (!first) {
@@ -272,11 +339,12 @@ function GroupView({ group }: { group: Group }) {
     )
   }
 
-  const billed = mine.filter((b) => group.bill === 'split' || !group.own.includes(b.id))
+  const billed = mine.filter((b) => group.bill === 'split' || !b.pays_own)
   const sum = (fn: (b: Booking) => number) => billed.reduce((n, b) => n + fn(b), 0)
-  const total = sum((b) => totalOf(b, roomOf(b)))
-  const paid = sum((b) => paidOf(b, roomOf(b)))
-  const due = sum((b) => dueOf(b, roomOf(b)))
+  // With hueni-api the server sums the billed rooms.
+  const total = group.total ?? sum((b) => totalOf(b, roomOf(b)))
+  const paid = group.paid ?? sum((b) => paidOf(b, roomOf(b)))
+  const due = group.due ?? sum((b) => dueOf(b, roomOf(b)))
   const guests = mine.reduce((n, b) => n + (b.guests || 0), 0)
   const docs = mine.reduce((n, b) => n + (b.docs?.length || 0), 0)
   const waiting = mine.filter(canCheckIn)
@@ -295,42 +363,30 @@ function GroupView({ group }: { group: Group }) {
   function open(b: Booking) {
     setSheet(b.id)
     setSel(undefined)
-    setOwn(group.own.includes(b.id))
+    setOwn(!!b.pays_own)
   }
 
   async function save() {
     if (sheet === 'add') {
       const room = rooms.find((r) => r.id === sel)!
-      const error = await record(() => {
-        const r = addGroupRooms(group, [room], first)
-        if (typeof r === 'string') return r
-      }, `Đã thêm phòng ${room.name}`)
+      const error = await record(() => groups.addRoom(group, room, first), `Đã thêm phòng ${room.name}`)
       if (!error) setSheet(undefined)
       return
     }
     const b = editing!
-    setGroup(group.id, {
-      own: own ? [...group.own.filter((x) => x !== b.id), b.id] : group.own.filter((x) => x !== b.id),
-    })
-    if (sel !== undefined) {
-      const { id: _id, source: _s, ...draft } = b
-      const error = await record(
-        () => actions.update(b.id, { ...draft, status: b.status === 'hold' ? 'hold' : 'confirmed', room_id: sel }),
-        `Đã đổi sang phòng ${allRooms.find((r) => r.id === sel)?.name}`,
-      )
-      if (error) return
-    } else toast(`Đã lưu phòng ${editRoom?.name}`)
-    setSheet(undefined)
+    const change = { room_id: sel, pays_own: own === !!b.pays_own ? undefined : own }
+    const error = await record(
+      () => groups.setRoom(group.id, b, change),
+      sel === undefined
+        ? `Đã lưu phòng ${editRoom?.name}`
+        : `Đã đổi sang phòng ${allRooms.find((r) => r.id === sel)?.name}`,
+    )
+    if (!error) setSheet(undefined)
   }
 
   function checkInAll() {
     record(
-      () => {
-        for (const b of waiting) {
-          const e = actions.checkIn(b.id, b.guests || roomOf(b)?.max_guests)
-          if (e) return `Phòng ${roomOf(b)?.name}: ${e}`
-        }
-      },
+      () => groups.checkIn(group.id, waiting),
       `Đã nhận ${waiting.length} phòng${docs < guests ? ` · ${guests - docs} khách còn thiếu giấy tờ` : ''}`,
     )
   }
@@ -372,7 +428,7 @@ function GroupView({ group }: { group: Group }) {
                       {isStaying(b) ? ' · đang ở' : b.checked_out_at ? ' · đã trả phòng' : ''}
                     </span>
                   </span>
-                  {group.bill === 'one' && group.own.includes(b.id) && <Badge tone="neutral">Tự trả</Badge>}
+                  {group.bill === 'one' && b.pays_own && <Badge tone="neutral">Tự trả</Badge>}
                 </button>
               )
             })}
@@ -391,7 +447,9 @@ function GroupView({ group }: { group: Group }) {
                 key={v}
                 type="button"
                 aria-pressed={group.bill === v}
-                onClick={() => setGroup(group.id, { bill: v })}
+                onClick={() =>
+                  record(() => groups.setBill(group.id, v), v === 'one' ? 'Một hoá đơn cho đoàn' : 'Tách theo phòng')
+                }
               >
                 {label}
               </button>
@@ -411,6 +469,11 @@ function GroupView({ group }: { group: Group }) {
               {money(due)}
             </KV>
           </dl>
+          {group.bill === 'one' && due > 0 && (
+            <button type="button" className="btn btn-block" style={{ marginTop: 8 }} onClick={() => setPaying(true)}>
+              Thu tiền cho đoàn
+            </button>
+          )}
         </Sec>
         <div className="end" />
       </main>
@@ -435,6 +498,17 @@ function GroupView({ group }: { group: Group }) {
               : `Nhận phòng từ ${fmtRange(first).slice(0, 5)}`}
         </button>
       </div>
+
+      {paying && (
+        <GroupPaySheet
+          group={group}
+          due={due}
+          billed={billed
+            .map((b) => ({ id: b.id, due: dueOf(b, roomOf(b)), name: roomOf(b)?.name || '' }))
+            .sort((a, b) => a.name.localeCompare(b.name))}
+          onClose={() => setPaying(false)}
+        />
+      )}
 
       {sheet !== undefined && (
         <Sheet title={editing ? `Phòng ${editRoom?.name}` : 'Thêm phòng cho đoàn'} onClose={() => setSheet(undefined)}>
@@ -474,9 +548,7 @@ function GroupView({ group }: { group: Group }) {
           <button
             type="button"
             className="btn btn-primary btn-block"
-            disabled={
-              sheet === 'add' ? sel === undefined : sel === undefined && own === group.own.includes(editing!.id)
-            }
+            disabled={sheet === 'add' ? sel === undefined : sel === undefined && own === !!editing!.pays_own}
             onClick={save}
           >
             {editing ? 'Lưu' : sel === undefined ? 'Chọn phòng' : `Thêm phòng ${rooms.find((r) => r.id === sel)?.name}`}
@@ -492,10 +564,13 @@ function GroupView({ group }: { group: Group }) {
               className="btn btn-danger btn-block"
               onClick={async () => {
                 const error = await record(
-                  () => actions.cancel(editing.id, `Bỏ khỏi đoàn ${group.name}`),
+                  () => remote.cancel(editing.id, `Bỏ khỏi đoàn ${group.name}`),
                   `Đã bỏ phòng ${editRoom?.name} khỏi đoàn`,
                 )
-                if (!error) setSheet(undefined)
+                if (!error) {
+                  setSheet(undefined)
+                  reload()
+                }
               }}
             >
               Bỏ phòng khỏi đoàn

@@ -177,6 +177,11 @@ export default function BookingPage() {
               <KV label="Điện thoại">{b.guest_phone || 'Chưa có'}</KV>
               <KV label="Số khách">{b.guests ? `${b.guests} khách` : 'Chưa rõ'}</KV>
               <KV label="Nguồn">{manual ? b.origin || 'Trực tiếp' : sourceLabel(b)}</KV>
+              {b.group_id && (
+                <KV label="Đoàn">
+                  <A to={`/groups/${b.group_id}`}>Mở đoàn</A>
+                </KV>
+              )}
             </dl>
             {manual && (
               <div className="actions">

@@ -24,7 +24,7 @@ import {
   weekday,
 } from '@/modules/pms/pms.store'
 import { buildReport, Channel, CHANNEL_LABEL, monthStart, Report } from '@/modules/pms/report'
-import { groupCode, useSales } from '@/modules/pms/sales.store'
+import { useSales } from '@/modules/pms/sales.store'
 
 const fmt = (d: dayjs.Dayjs) => d.format('YYYY-MM-DD')
 const million = (n: number) =>
@@ -245,9 +245,7 @@ export default function ReportPage() {
         rooms.find((x) => x.id === b.room_id),
       ),
   ).map((x) => {
-    const g = x.b.group_id
-      ? groups.find((y) => y.id === x.b.group_id && y.bill === 'one' && !y.own.includes(x.b.id))
-      : undefined
+    const g = x.b.group_id ? groups.find((y) => y.id === x.b.group_id && y.bill === 'one' && !x.b.pays_own) : undefined
     return { ...x, g }
   })
   const lines = Object.values(
@@ -454,7 +452,7 @@ export default function ReportPage() {
                 >
                   <span className="grow">
                     <span className="t1">
-                      {x.g ? `${x.g.name} · ${groupCode(x.g)}` : `${guestLabel(x.b)} · ${bookingCode(x.b)}`}
+                      {x.g ? `${x.g.name} · ${x.g.code}` : `${guestLabel(x.b)} · ${bookingCode(x.b)}`}
                     </span>
                     <span className="t2" style={x.late ? { color: 'var(--danger)', fontWeight: 600 } : undefined}>
                       {x.g ? `${x.count} phòng · ` : ''}
