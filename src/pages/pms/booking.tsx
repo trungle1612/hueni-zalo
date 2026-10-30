@@ -22,6 +22,7 @@ import {
 } from '@/modules/pms/components/ui'
 import { isLive } from '@/modules/pms/live'
 import {
+  allows,
   Booking,
   bookingCode,
   can,
@@ -55,7 +56,7 @@ import {
   usePms,
   whenLabel,
 } from '@/modules/pms/pms.store'
-import { fetchBooking, remote, useActivity } from '@/modules/pms/remote'
+import { fetchBooking, remote, requestRefund, useActivity } from '@/modules/pms/remote'
 import { GuestFlagNotice } from '@/pages/pms/guests'
 
 const isToday = (iso?: string) => !!iso && dayjs(iso).isSame(dayjs(), 'day')
@@ -341,7 +342,9 @@ export default function BookingPage() {
         <StaySheet kind={sheet} booking={b} room={room} onClose={() => setSheet(undefined)} />
       )}
       {sheet === 'pay' && <PaySheet booking={b} room={room} onClose={() => setSheet(undefined)} />}
-      {sheet === 'cancel' && <CancelSheet booking={b} room={room} owner={owner} onClose={() => setSheet(undefined)} />}
+      {sheet === 'cancel' && (
+        <CancelSheet booking={b} room={room} refunder={allows(place, 'refund')} onClose={() => setSheet(undefined)} />
+      )}
       {sheet === 'move' && <MoveSheet booking={b} room={room} onClose={() => setSheet(undefined)} />}
       {(sheet === 'undo-in' || sheet === 'undo-out') && (
         <UndoSheet booking={b} room={room} out={sheet === 'undo-out'} onClose={() => setSheet(undefined)} />
@@ -393,7 +396,8 @@ function PaySheet({ booking: b, room, onClose }: SheetProps) {
 
 const REASONS = ['Khách huỷ', 'Khách không đến', 'Đặt trùng', 'Lý do khác']
 
-function CancelSheet({ booking: b, room, owner, onClose }: SheetProps & { owner: boolean }) {
+// refunder: owner, or staff with the refund right; other staff send Xin hoàn tiền (#28) after cancelling.
+function CancelSheet({ booking: b, room, refunder, onClose }: SheetProps & { refunder: boolean }) {
   const record = useRecord()
   const paid = paidOf(b, room)
   const [reason, setReason] = useState<string>()
@@ -407,12 +411,17 @@ function CancelSheet({ booking: b, room, owner, onClose }: SheetProps & { owner:
     const dep = !paid
       ? ''
       : refund
-        ? owner
+        ? refunder
           ? `hoàn cọc ${money(paid)} ${PAY_METHOD[method].toLowerCase()}`
           : `chờ duyệt hoàn cọc ${money(paid)}`
         : `giữ cọc ${money(paid)}`
+    const note = [reason, dep].filter(Boolean).join(', ')
     const error = await record(
-      () => remote.cancel(b.id, [reason, dep].filter(Boolean).join(', '), refund && owner ? method : undefined),
+      async () => {
+        const e = await remote.cancel(b.id, note, refund && refunder ? method : undefined)
+        if (e || !refund || refunder) return e
+        return requestRefund(b.id, paid, method, note)
+      },
       `Đã huỷ ${bookingCode(b)}${dep ? ` · ${dep}` : ''}`,
     )
     if (!error) onClose()
@@ -448,10 +457,10 @@ function CancelSheet({ booking: b, room, owner, onClose }: SheetProps & { owner:
             </label>
             <label className="choice">
               <input type="radio" name="dep" checked={refund === true} onChange={() => setRefund(true)} />
-              {owner ? `Hoàn lại ${money(paid)} cho khách` : 'Xin chủ cơ sở duyệt hoàn cọc'}
+              {refunder ? `Hoàn lại ${money(paid)} cho khách` : 'Xin chủ cơ sở duyệt hoàn cọc'}
             </label>
           </div>
-          {refund && owner && (
+          {refund && (
             <Segmented
               label="Hoàn bằng"
               value={method}
@@ -459,9 +468,9 @@ function CancelSheet({ booking: b, room, owner, onClose }: SheetProps & { owner:
               options={Object.entries(PAY_METHOD) as [PayMethod, string][]}
             />
           )}
-          {refund && !owner && (
+          {refund && !refunder && (
             <p className="help">
-              Tài khoản Lễ tân không tự hoàn tiền. Chủ cơ sở sẽ nhận yêu cầu và hoàn cọc sau khi duyệt.
+              Bạn chưa có quyền tự hoàn tiền. Chủ cơ sở nhận yêu cầu ở mục Nhân viên và hoàn cọc sau khi duyệt.
             </p>
           )}
         </div>

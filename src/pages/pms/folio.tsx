@@ -21,6 +21,7 @@ import {
 import { logActivity, patchBooking, SERVICES, STAFF_DISCOUNT, useGuests } from '@/modules/pms/guests.store'
 import { isLive } from '@/modules/pms/live'
 import {
+  allows,
   Booking,
   bookingCode,
   can,
@@ -171,7 +172,7 @@ export default function FolioPage() {
                 <button type="button" className="btn btn-sm" onClick={() => setSheet('add')}>
                   + Dịch vụ
                 </button>
-                {!b.discount && (
+                {!b.discount && allows(place, 'discount') && (
                   <button type="button" className="btn btn-sm" onClick={() => setSheet('discount')}>
                     Giảm giá
                   </button>

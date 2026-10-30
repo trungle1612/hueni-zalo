@@ -3,7 +3,21 @@ import { useCallback, useEffect, useState } from 'react'
 import { API_URL } from '@/constants/common'
 
 import { api, ApiError } from './api'
-import { addDays, AMENITY, Booking, day, Feed, PayMethod, Room, ROOM_TYPE, RoomDraft, usePms } from './pms.store'
+import {
+  addDays,
+  AMENITY,
+  Booking,
+  day,
+  Feed,
+  PayMethod,
+  Perm,
+  Role,
+  Room,
+  ROOM_TYPE,
+  RoomDraft,
+  usePms,
+} from './pms.store'
+import { RefundRequest, Staff, useSetup } from './setup.store'
 
 // Booking and front-desk actions for the screens connected to hueni-api (#34, #35, wiki Mini-App-API).
 // With API_URL every action is a request and the server's answer replaces the local copy; without it
@@ -425,5 +439,95 @@ export function useCommissions(
         return message(e)
       }
     },
+  }
+}
+
+// ---------- nhân viên (#28, hueni-api#168) ----------
+// Owner only, the API enforces (last owner, locking an owner, phone already taken). The server's members and
+// pending refund requests replace the mock ones in useSetup; without API_URL the actions change the mock.
+
+const setStaff = (m: Staff) =>
+  useSetup.setState((s) => ({
+    staff: s.staff.some((x) => x.id === m.id) ? s.staff.map((x) => (x.id === m.id ? m : x)) : [...s.staff, m],
+  }))
+const mockStaff = (id: number, x: Partial<Staff>) =>
+  useSetup.setState((s) => ({ staff: s.staff.map((y) => (y.id === id ? { ...y, ...x } : y)) }))
+
+// setup_link: one-time login link (7 days) for the owner to send over Zalo. A credential: never log it.
+type Linked = { setup_link?: string } | string
+
+async function member(path: string, body?: unknown, method = 'POST'): Promise<Linked> {
+  try {
+    const r = await api<{ member: Staff; setup_link?: string }>(path, { method, body })
+    setStaff(strip<Staff>(r.member))
+    return { setup_link: r.setup_link }
+  } catch (e) {
+    return message(e)
+  }
+}
+const failed = (r: Linked): Result => (typeof r === 'string' ? r : undefined)
+
+export async function loadStaff(placeId: number): Promise<Result> {
+  if (!API_URL) return
+  useSetup.setState({ staff: [], refundRequests: [] })
+  try {
+    const [{ members }, { refund_requests }] = await Promise.all([
+      api<{ members: Staff[] }>(`/places/${placeId}/memberships`),
+      api<{ refund_requests: RefundRequest[] }>(`/places/${placeId}/refund_requests`),
+    ])
+    useSetup.setState({
+      staff: members.map((m) => strip<Staff>(m)),
+      refundRequests: refund_requests.map((r) => strip<RefundRequest>(r)),
+    })
+  } catch (e) {
+    return message(e)
+  }
+}
+
+export const staffRemote = {
+  // permissions left out = the server's default (discount).
+  invite: async (placeId: number, m: { name: string; phone_number: string; role: Role }): Promise<Linked> => {
+    if (API_URL) return member(`/places/${placeId}/memberships`, { member: m })
+    const id = Date.now()
+    setStaff({ ...m, id, user_id: id, phone: m.phone_number, permissions: ['discount'], locked: false, invited: true })
+    return {}
+  },
+  save: async (id: number, m: { role: Role; permissions: Perm[] }): Promise<Result> =>
+    API_URL ? failed(await member(`/memberships/${id}`, { member: m }, 'PATCH')) : mockStaff(id, m),
+  lock: async (id: number, locked: boolean): Promise<Result> =>
+    API_URL ? failed(await member(`/memberships/${id}/${locked ? 'lock' : 'unlock'}`)) : mockStaff(id, { locked }),
+  // Mất máy, đổi Zalo: the old link and every session end. No link in mock mode.
+  setupLink: async (id: number): Promise<Linked> => (API_URL ? member(`/memberships/${id}/setup_link`) : {}),
+  remove: async (id: number): Promise<Result> => {
+    if (API_URL)
+      try {
+        await api(`/memberships/${id}`, { method: 'DELETE' })
+      } catch (e) {
+        return message(e)
+      }
+    useSetup.setState((s) => ({ staff: s.staff.filter((x) => x.id !== id) }))
+  },
+  // Duyệt writes the refund on the booking as the requester's; either way it leaves Chờ duyệt.
+  decide: async (id: number, approve: boolean): Promise<Result> => {
+    if (API_URL)
+      try {
+        await api(`/refund_requests/${id}/${approve ? 'approve' : 'reject'}`, { method: 'POST' })
+      } catch (e) {
+        return message(e)
+      }
+    useSetup.setState((s) => ({ refundRequests: s.refundRequests.filter((r) => r.id !== id) }))
+  },
+}
+
+// Xin hoàn tiền: staff without the refund right ask; the owner sees it in Chờ duyệt (/staff).
+// ponytail: nothing to ask in mock mode; the mock's Chờ duyệt has a sample request.
+export async function requestRefund(bookingId: number, amount: number, method: PayMethod, note: string) {
+  if (!API_URL) return
+  try {
+    await api(`/bookings/${bookingId}/refund_requests`, {
+      body: { refund_request: { amount, payment_method: method, note: note.slice(0, 200) } },
+    })
+  } catch (e) {
+    return message(e)
   }
 }
