@@ -175,7 +175,7 @@ export default function LoginPage() {
       </footer>
       {intro && (
         <Sheet className="dialog" title="hueni cần thông tin của bạn" onClose={() => setIntro(false)}>
-          <p>Đăng nhập gồm 2 bước: xác nhận trên Zalo, rồi nhập số điện thoại.</p>
+          <p>Đăng nhập gồm 2 bước: xác nhận trên Zalo, rồi cho phép dùng số điện thoại Zalo.</p>
           <ul>
             <li>
               <Icon name="user" stroke={1.75} />
@@ -187,8 +187,8 @@ export default function LoginPage() {
             <li>
               <Icon name="phone" stroke={1.75} />
               <div>
-                <b>Số điện thoại · bạn tự nhập</b>
-                <span>Để biết bạn thuộc cơ sở nào. Chỉ cần nhập lần đầu trên mỗi tài khoản Zalo.</span>
+                <b>Số điện thoại · lấy từ Zalo</b>
+                <span>Để biết bạn thuộc cơ sở nào. Zalo hỏi bạn cho phép, chỉ lần đầu trên mỗi tài khoản Zalo.</span>
               </div>
             </li>
             <li className="muted">
