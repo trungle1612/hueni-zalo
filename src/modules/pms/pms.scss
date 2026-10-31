@@ -421,6 +421,21 @@
       color: var(--text-2);
     }
   }
+  // Zalo's own blue for the Zalo sign-in only; white on #0068ff is 4.6:1.
+  .btn-zalo {
+    gap: 10px;
+    background: #0068ff;
+    border-color: #0068ff;
+    color: #fff;
+
+    &:active:not(:disabled) {
+      background: #0052cc;
+      border-color: #0052cc;
+    }
+    &:disabled {
+      opacity: 0.7;
+    }
+  }
   // Never filled red: next to the ruby primary it would read as the main action.
   .btn-danger {
     background: var(--danger-bg);
@@ -1376,6 +1391,12 @@
       color: var(--text-2);
     }
   }
+  .login .btn.link {
+    align-self: flex-start;
+    padding: 0;
+    color: #0068ff;
+    font-size: 15px;
+  }
   .login-foot {
     flex: none;
     padding: 16px 24px max(var(--zaui-safe-area-inset-bottom, 0px), 32px);
@@ -1415,6 +1436,54 @@
   }
   &:focus {
     outline: none; // focus lands on the dialog itself on open; controls inside keep their ring
+  }
+}
+.pms .sheet.dialog {
+  left: 16px;
+  right: 16px;
+  bottom: auto;
+  top: 50%;
+  transform: translateY(-50%);
+  border-radius: 8px;
+  padding: 0;
+  gap: 0;
+
+  > h2 {
+    padding: 20px 20px 0;
+  }
+  > p {
+    margin: 0;
+    padding: 4px 20px 16px;
+    color: var(--text-2);
+  }
+  ul {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    border-top: 1px solid var(--border);
+  }
+  li {
+    margin: 0;
+    display: flex;
+    gap: 12px;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+    &.muted {
+      background: var(--muted-bg);
+    }
+    svg {
+      flex: none;
+      margin-top: 2px;
+    }
+    span {
+      display: block;
+      color: var(--text-2);
+    }
+  }
+  > .btn {
+    flex: none;
+    margin: 16px 20px 20px;
+    width: auto;
   }
 }
 .pms-toast {

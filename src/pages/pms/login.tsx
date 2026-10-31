@@ -4,8 +4,9 @@ import { getAccessToken, getPhoneNumber } from 'zmp-sdk'
 
 import { API_URL } from '@/constants/common'
 import { api, ApiError } from '@/modules/pms/api'
-import { Field, Screen, Spinner } from '@/modules/pms/components/ui'
+import { Field, Icon, Screen, Sheet, Spinner } from '@/modules/pms/components/ui'
 import { Session, usePms } from '@/modules/pms/pms.store'
+import zaloIcon from '@/static/images/zalo-icon.png'
 
 // Đăng ký chủ nhà (wiki Mini-App-API): an owner request the hueni admin approves after calling them.
 type Registration = {
@@ -30,6 +31,7 @@ export default function LoginPage() {
   const [error, setError] = useState('')
   const [linking, setLinking] = useState<Unknown>() // a Zalo account hueni doesn't know yet
   const [registering, setRegistering] = useState(false)
+  const [intro, setIntro] = useState(true) // what hueni takes from Zalo, shown before the first tap
   if (signedIn) return <Navigate to="/" replace />
 
   const back = () => {
@@ -142,13 +144,17 @@ export default function LoginPage() {
               <h1>Đăng nhập</h1>
               <button
                 type="button"
-                className="btn btn-primary btn-block"
+                className="btn btn-zalo btn-block"
                 style={{ minHeight: 48 }}
                 disabled={waiting}
                 onClick={zalo}
               >
-                {waiting && <Spinner />}
+                {waiting ? <Spinner /> : <img src={zaloIcon} alt="" width={28} height={28} />}
                 {waiting ? 'Đang chờ Zalo xác nhận…' : 'Đăng nhập bằng Zalo'}
+              </button>
+              <button type="button" className="btn btn-ghost link" onClick={() => setIntro(true)}>
+                <Icon name="lock" size={16} />
+                hueni nhận gì từ Zalo?
               </button>
             </>
           )}
@@ -167,6 +173,42 @@ export default function LoginPage() {
       <footer className="login-foot">
         Chưa có tài khoản? Chủ cơ sở thêm nhân viên trên trang quản trị hueni, mục Nhân viên.
       </footer>
+      {intro && (
+        <Sheet className="dialog" title="hueni cần thông tin của bạn" onClose={() => setIntro(false)}>
+          <p>Đăng nhập gồm 2 bước: xác nhận trên Zalo, rồi nhập số điện thoại.</p>
+          <ul>
+            <li>
+              <Icon name="user" stroke={1.75} />
+              <div>
+                <b>Tên và ảnh đại diện · lấy từ Zalo</b>
+                <span>Hiện trong danh sách nhân viên, giao ca và nhật ký thao tác.</span>
+              </div>
+            </li>
+            <li>
+              <Icon name="phone" stroke={1.75} />
+              <div>
+                <b>Số điện thoại · bạn tự nhập</b>
+                <span>Để biết bạn thuộc cơ sở nào. Chỉ cần nhập lần đầu trên mỗi tài khoản Zalo.</span>
+              </div>
+            </li>
+            <li className="muted">
+              <Icon name="block" stroke={1.75} />
+              <div>
+                <b>Không truy cập</b>
+                <span>Tin nhắn, danh bạ và bạn bè Zalo của bạn.</span>
+              </div>
+            </li>
+          </ul>
+          <button
+            type="button"
+            className="btn btn-primary btn-block"
+            style={{ minHeight: 48 }}
+            onClick={() => setIntro(false)}
+          >
+            Đã hiểu
+          </button>
+        </Sheet>
+      )}
     </Screen>
   )
 }

@@ -36,6 +36,27 @@ const ICON = {
     </>
   ),
   report: <path d="M4 20V10M10 20V4M16 20v-7M22 20H2" />,
+  user: (
+    <>
+      <circle cx="12" cy="8" r="4" />
+      <path d="M4 21a8 8 0 0 1 16 0" />
+    </>
+  ),
+  phone: (
+    <path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.9.7 2.8a2 2 0 0 1-.5 2.1L8 9.9a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.9.6 2.8.7a2 2 0 0 1 1.7 2z" />
+  ),
+  lock: (
+    <>
+      <rect x="5" y="11" width="14" height="10" rx="2" />
+      <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+    </>
+  ),
+  block: (
+    <>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M5.6 5.6l12.8 12.8" />
+    </>
+  ),
   more: (
     <>
       <circle cx="5" cy="12" r="1.5" />
@@ -300,10 +321,12 @@ export function Sheet({
   title,
   onClose,
   children,
+  className,
 }: {
   title: React.ReactNode
   onClose: () => void
   children: React.ReactNode
+  className?: string
 }) {
   const id = useId()
   const ref = useRef<HTMLDivElement>(null)
@@ -345,7 +368,14 @@ export function Sheet({
   return (
     <>
       <div className="scrim" onClick={onClose} />
-      <div ref={ref} tabIndex={-1} className="sheet" role="dialog" aria-modal="true" aria-labelledby={id}>
+      <div
+        ref={ref}
+        tabIndex={-1}
+        className={clsx('sheet', className)}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={id}
+      >
         <h2 id={id}>{title}</h2>
         {children}
       </div>
