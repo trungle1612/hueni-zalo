@@ -73,13 +73,6 @@ export const LEGAL: Record<Doc, Text> = {
           'Khi thay đổi nội dung quan trọng, chúng tôi báo trong ứng dụng và hỏi lại sự đồng ý của bạn ở lần mở ứng dụng tiếp theo.',
         ],
       },
-      {
-        title: 'Luật áp dụng và liên hệ',
-        paras: [
-          'Điều khoản này theo pháp luật Việt Nam. Tranh chấp ưu tiên giải quyết bằng thương lượng; nếu không thành, Toà án có thẩm quyền tại [tỉnh/thành phố] giải quyết.',
-          'hueni · [địa chỉ] · [số điện thoại / email / Zalo OA hỗ trợ].',
-        ],
-      },
     ],
   },
   privacy: {
@@ -120,9 +113,9 @@ export const LEGAL: Record<Doc, Text> = {
       {
         title: 'Chia sẻ với ai',
         paras: [
-          'Chỉ phần cần thiết cho: Zalo (đăng nhập), kênh bán phòng mà cơ sở tự kết nối, nhà cung cấp máy chủ [tên nhà cung cấp].',
+          'Chỉ phần cần thiết cho: Zalo (đăng nhập), kênh bán phòng mà cơ sở tự kết nối, nhà cung cấp máy chủ [HyperCore].',
           'Cơ quan nhà nước có thẩm quyền khi pháp luật yêu cầu.',
-          'Dữ liệu được lưu tại [nơi đặt máy chủ].',
+          'Dữ liệu được lưu tại [HyperCore].',
         ],
       },
       {
@@ -137,7 +130,7 @@ export const LEGAL: Record<Doc, Text> = {
         paras: [
           'Bạn có quyền được biết, đồng ý hoặc rút lại sự đồng ý, xem, sửa, xoá dữ liệu, phản đối hoặc hạn chế xử lý, khiếu nại.',
           'Rút lại sự đồng ý không ảnh hưởng việc xử lý đã làm trước đó. Sau khi rút, bạn không thể tiếp tục dùng hueni.',
-          'Gửi yêu cầu qua [số điện thoại / email / Zalo OA hỗ trợ].',
+          'Gửi yêu cầu qua [0794521276].',
         ],
       },
       {
