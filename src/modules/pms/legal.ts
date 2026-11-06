@@ -1,5 +1,5 @@
 // Điều khoản sử dụng + Chính sách bảo mật, shown in-app (Zalo CP §4.1, §4.8).
-// ponytail: draft adapted from the design's Legal board; [placeholders] are the owner's legal entity data and block
+// ponytail: draft adapted from the design's Legal board; [placeholders] are the owner's legal data and block
 // release (#57). Changing a text means a new TERMS_VERSION: everyone is asked to agree again.
 
 // Date of the texts below, sent to hueni-api when the user agrees (hueni-api #206).
@@ -21,7 +21,7 @@ export const LEGAL: Record<Doc, Text> = {
       {
         title: 'Phạm vi và chấp nhận',
         paras: [
-          'Điều khoản này áp dụng giữa [Tên công ty] ("chúng tôi") và người dùng ứng dụng hueni trên Zalo, gồm chủ cơ sở lưu trú và nhân viên được thêm.',
+          'Điều khoản này áp dụng giữa hueni ("chúng tôi") và người dùng ứng dụng hueni trên Zalo, gồm chủ cơ sở lưu trú và nhân viên được thêm.',
           'Bạn chấp nhận điều khoản khi tích ô đồng ý. Nếu không đồng ý, bạn không thể dùng hueni.',
         ],
       },
@@ -77,7 +77,7 @@ export const LEGAL: Record<Doc, Text> = {
         title: 'Luật áp dụng và liên hệ',
         paras: [
           'Điều khoản này theo pháp luật Việt Nam. Tranh chấp ưu tiên giải quyết bằng thương lượng; nếu không thành, Toà án có thẩm quyền tại [tỉnh/thành phố] giải quyết.',
-          '[Tên công ty] · [địa chỉ] · [số điện thoại / email / Zalo OA hỗ trợ].',
+          'hueni · [địa chỉ] · [số điện thoại / email / Zalo OA hỗ trợ].',
         ],
       },
     ],
@@ -94,8 +94,8 @@ export const LEGAL: Record<Doc, Text> = {
       {
         title: 'Chúng tôi là ai',
         paras: [
-          '[Tên công ty] là bên kiểm soát dữ liệu tài khoản của chủ cơ sở và nhân viên.',
-          'Với dữ liệu khách lưu trú, cơ sở lưu trú là bên kiểm soát; [Tên công ty] là bên xử lý, chỉ xử lý theo yêu cầu của cơ sở.',
+          'hueni là bên kiểm soát dữ liệu tài khoản của chủ cơ sở và nhân viên.',
+          'Với dữ liệu khách lưu trú, cơ sở lưu trú là bên kiểm soát; hueni là bên xử lý, chỉ xử lý theo yêu cầu của cơ sở.',
         ],
       },
       {
