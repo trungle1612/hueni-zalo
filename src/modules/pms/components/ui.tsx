@@ -1,4 +1,4 @@
-import React, { useEffect, useId, useRef } from 'react'
+import React, { useEffect, useId, useRef, useState } from 'react'
 import { Navigate } from 'react-router-dom'
 import { openPhone, openWebview } from 'zmp-sdk'
 import { Page, useNavigate } from 'zmp-ui'
@@ -7,6 +7,8 @@ import { create } from 'zustand'
 import { API_URL } from '@/constants/common'
 import { clsx } from '@/utils/clsx'
 
+import { api, ApiError } from '../api'
+import { Doc, LEGAL, TERMS_VERSION } from '../legal'
 import { Booking, fmtDay, holdUntil, isStaying, placeRooms, today, usePlace, usePms } from '../pms.store'
 
 // ---------- icons (design: only the tab bar, back/close, search and week arrows) ----------
@@ -174,11 +176,13 @@ export function Screen({
   open?: boolean // the login screen
 }) {
   const signedIn = usePms((s) => s.signedIn)
+  const agreed = usePms((s) => s.user.terms_version === TERMS_VERSION)
   if (!open && !signedIn) return <Navigate to="/login" replace />
   return (
     <Page className={clsx('pms', plain && 'plain')} resetScroll={false}>
       {children}
       {tab && <TabBar active={tab} />}
+      {!open && API_URL && !agreed && <TermsGate />}
     </Page>
   )
 }
@@ -585,5 +589,130 @@ export function Segmented<T extends string>({
         </button>
       ))}
     </div>
+  )
+}
+
+// ---------- consent (hueni-api #206) ----------
+
+// The unticked box before hueni reads the Zalo phone or takes a registration. The names open the texts in-app.
+export function Agree({
+  checked,
+  onChange,
+  onOpen,
+  children,
+}: {
+  checked: boolean
+  onChange: (v: boolean) => void
+  onOpen: (doc: Doc) => void
+  children?: React.ReactNode
+}) {
+  // Buttons inside a <label> don't toggle the box.
+  const link = (doc: Doc) => (
+    <button type="button" onClick={() => onOpen(doc)}>
+      {LEGAL[doc].label}
+    </button>
+  )
+  return (
+    <label className="agree">
+      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+      <span>
+        Tôi đồng ý {link('terms')} và {link('privacy')}
+        {children}.
+      </span>
+    </label>
+  )
+}
+
+// Điều khoản sử dụng / Chính sách bảo mật over the current step, which stays as it was underneath.
+export function Legal({ doc, onClose }: { doc: Doc; onClose: () => void }) {
+  const [tab, setTab] = useState(doc)
+  return (
+    <Sheet className="legal" title="Điều khoản và bảo mật" onClose={onClose}>
+      <Segmented
+        label="Văn bản"
+        value={tab}
+        options={[
+          ['terms', LEGAL.terms.label],
+          ['privacy', LEGAL.privacy.label],
+        ]}
+        onChange={setTab}
+      />
+      <p className="help">Phiên bản {TERMS_VERSION.split('-').reverse().join('/')}</p>
+      <ul className="legal-sum">
+        {LEGAL[tab].summary.map((t) => (
+          <li key={t}>{t}</li>
+        ))}
+      </ul>
+      {LEGAL[tab].sections.map((x, i) => (
+        <details key={`${tab}${i}`} open={i === 0}>
+          <summary>
+            {i + 1}. {x.title}
+          </summary>
+          {x.paras.map((t) => (
+            <p key={t}>{t}</p>
+          ))}
+        </details>
+      ))}
+      <button type="button" className="btn btn-primary btn-block" style={{ minHeight: 48 }} onClick={onClose}>
+        Quay lại
+      </button>
+    </Sheet>
+  )
+}
+
+// Records the version the user just ticked; `token` before the session is stored (sign-in).
+export const acceptTerms = (token = usePms.getState().token) =>
+  api('/me/terms', { body: { version: TERMS_VERSION }, headers: { Authorization: `Bearer ${token}` } })
+
+// Signed in without the current version (a known Zalo id that never agreed, or newer texts): agree or sign out.
+function TermsGate() {
+  const { user, token, places, actions } = usePms()
+  const [agreed, setAgreed] = useState(false)
+  const [doc, setDoc] = useState<Doc>()
+  const [waiting, setWaiting] = useState(false)
+  const [error, setError] = useState('')
+  if (doc) return <Legal doc={doc} onClose={() => setDoc(undefined)} />
+
+  async function agree() {
+    setWaiting(true)
+    setError('')
+    try {
+      await acceptTerms()
+      actions.signIn({ token, places, user: { ...user, terms_version: TERMS_VERSION } })
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Có lỗi, thử lại sau ít phút.')
+      setWaiting(false)
+    }
+  }
+
+  return (
+    <Sheet
+      className="dialog terms"
+      title={user.terms_version ? 'Điều khoản đã cập nhật' : 'Đồng ý để tiếp tục'}
+      onClose={() => {}}
+    >
+      <p>Đọc và đồng ý Điều khoản sử dụng và Chính sách bảo mật để tiếp tục dùng hueni.</p>
+      <div className="terms-f">
+        <Agree checked={agreed} onChange={setAgreed} onOpen={setDoc} />
+        {error && (
+          <div className="notice err" role="alert">
+            {error}
+          </div>
+        )}
+        <button
+          type="button"
+          className="btn btn-primary btn-block"
+          style={{ minHeight: 48 }}
+          disabled={!agreed || waiting}
+          onClick={agree}
+        >
+          {waiting && <Spinner />}
+          Tiếp tục
+        </button>
+        <button type="button" className="btn btn-ghost btn-block" disabled={waiting} onClick={actions.signOut}>
+          Đăng xuất
+        </button>
+      </div>
+    </Sheet>
   )
 }

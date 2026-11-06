@@ -752,7 +752,12 @@ type State = {
 }
 
 // POST /api/v1/session's answer; without VITE_API_URL a mock one over the mock places.
-export type Session = { token: string; expires_at?: string; user: { id?: number; name: string }; places: Place[] }
+export type Session = {
+  token: string
+  expires_at?: string
+  user: { id?: number; name: string; terms_version?: string | null }
+  places: Place[]
+}
 const MOCK_SESSION: Session = { token: '', user: { name: 'Chị Hoa' }, places }
 
 const SESSION = 'pms.session'
