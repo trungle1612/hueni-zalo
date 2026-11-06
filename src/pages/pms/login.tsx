@@ -4,7 +4,8 @@ import { getAccessToken, getPhoneNumber } from 'zmp-sdk'
 
 import { API_URL } from '@/constants/common'
 import { api, ApiError } from '@/modules/pms/api'
-import { Field, Icon, Screen, Sheet, Spinner } from '@/modules/pms/components/ui'
+import { acceptTerms, Agree, Field, Icon, Legal, Screen, Sheet, Spinner } from '@/modules/pms/components/ui'
+import { Doc, TERMS_VERSION } from '@/modules/pms/legal'
 import { Session, usePms } from '@/modules/pms/pms.store'
 import zaloIcon from '@/static/images/zalo-icon.png'
 
@@ -20,9 +21,9 @@ type Unknown = { access_token: string; registration_token: string; registration:
 
 // A known Zalo id signs in. Otherwise, after the user has read why (Zalo's guidance: ask for the phone
 // only when needed, explained first), the Zalo phone links the owner or staff member added in the web admin.
-// getPhoneNumber needs Zalo's approval of scope.userPhonenumber.
+// getPhoneNumber needs Zalo's approval of scope.userPhonenumber. Linking records the terms the user ticked (hueni-api #206).
 const ask = (access_token: string, phone_token?: string) =>
-  api<Session>('/session', { body: { access_token, phone_token } })
+  api<Session>('/session', { body: { access_token, phone_token, terms_version: phone_token && TERMS_VERSION } })
 
 // Zalo identity only (PRODUCT.md: no password in the mini app); the canvas's phone + password form is left out.
 export default function LoginPage() {
@@ -31,7 +32,10 @@ export default function LoginPage() {
   const [error, setError] = useState('')
   const [linking, setLinking] = useState<Unknown>() // a Zalo account hueni doesn't know yet
   const [registering, setRegistering] = useState(false)
-  const [intro, setIntro] = useState(true) // what hueni takes from Zalo, shown before the first tap
+  // What hueni takes from Zalo, with the agreement: shown on open ('info'), or on a tap before agreeing ('pre').
+  const [intro, setIntro] = useState<'info' | 'pre' | undefined>('info')
+  const [agreed, setAgreed] = useState(false)
+  const [doc, setDoc] = useState<Doc>() // a policy text open over the current step
   if (signedIn) return <Navigate to="/" replace />
 
   const back = () => {
@@ -47,6 +51,11 @@ export default function LoginPage() {
       const session = await step()
       if (!session.places.length)
         return setError('Tài khoản chưa thuộc cơ sở nào. Nhờ chủ cơ sở thêm bạn trên trang quản trị hueni.')
+      // A known Zalo id just ticked the box here: record it, or the app asks again right away.
+      if (session.user.terms_version !== TERMS_VERSION)
+        await acceptTerms(session.token)
+          .then(() => (session.user.terms_version = TERMS_VERSION))
+          .catch(() => {}) // the sign-in sheet asks again
       actions.signIn(session)
     } catch (e) {
       // First not_registered opens the linking step; still unknown with the phone → Đăng ký chủ nhà.
@@ -94,6 +103,8 @@ export default function LoginPage() {
       <Register
         unknown={linking}
         onBack={back}
+        onOpen={setDoc}
+        doc={doc}
         onApproved={() => {
           back()
           zalo()
@@ -147,12 +158,12 @@ export default function LoginPage() {
                 className="btn btn-zalo btn-block"
                 style={{ minHeight: 48 }}
                 disabled={waiting}
-                onClick={zalo}
+                onClick={agreed ? zalo : () => setIntro('pre')}
               >
                 {waiting ? <Spinner /> : <img src={zaloIcon} alt="" width={28} height={28} />}
                 {waiting ? 'Đang chờ Zalo xác nhận…' : 'Đăng nhập bằng Zalo'}
               </button>
-              <button type="button" className="btn btn-ghost link" onClick={() => setIntro(true)}>
+              <button type="button" className="btn btn-ghost link" onClick={() => setIntro('info')}>
                 <Icon name="lock" size={16} />
                 hueni nhận gì từ Zalo?
               </button>
@@ -173,41 +184,57 @@ export default function LoginPage() {
       <footer className="login-foot">
         Chưa có tài khoản? Chủ cơ sở thêm nhân viên trên trang quản trị hueni, mục Nhân viên.
       </footer>
-      {intro && (
-        <Sheet className="dialog" title="hueni cần thông tin của bạn" onClose={() => setIntro(false)}>
-          <p>Đăng nhập gồm 2 bước: xác nhận trên Zalo, rồi cho phép dùng số điện thoại Zalo.</p>
-          <ul>
-            <li>
-              <Icon name="user" stroke={1.75} />
-              <div>
-                <b>Tên và ảnh đại diện · lấy từ Zalo</b>
-                <span>Hiện trong danh sách nhân viên, giao ca và nhật ký thao tác.</span>
-              </div>
-            </li>
-            <li>
-              <Icon name="phone" stroke={1.75} />
-              <div>
-                <b>Số điện thoại · lấy từ Zalo</b>
-                <span>Để biết bạn thuộc cơ sở nào. Zalo hỏi bạn cho phép, chỉ lần đầu trên mỗi tài khoản Zalo.</span>
-              </div>
-            </li>
-            <li className="muted">
-              <Icon name="block" stroke={1.75} />
-              <div>
-                <b>Không truy cập</b>
-                <span>Tin nhắn, danh bạ và bạn bè Zalo của bạn.</span>
-              </div>
-            </li>
-          </ul>
-          <button
-            type="button"
-            className="btn btn-primary btn-block"
-            style={{ minHeight: 48 }}
-            onClick={() => setIntro(false)}
-          >
-            Đã hiểu
-          </button>
-        </Sheet>
+      {doc ? (
+        <Legal doc={doc} onClose={() => setDoc(undefined)} />
+      ) : (
+        intro && (
+          <Sheet className="dialog" title="hueni cần thông tin của bạn" onClose={() => setIntro(undefined)}>
+            <p>Đăng nhập gồm 2 bước: xác nhận trên Zalo, rồi cho phép dùng số điện thoại Zalo.</p>
+            <ul>
+              <li>
+                <Icon name="user" stroke={1.75} />
+                <div>
+                  <b>Tên và ảnh đại diện · lấy từ Zalo</b>
+                  <span>Hiện trong danh sách nhân viên, giao ca và nhật ký thao tác.</span>
+                </div>
+              </li>
+              <li>
+                <Icon name="phone" stroke={1.75} />
+                <div>
+                  <b>Số điện thoại · lấy từ Zalo</b>
+                  <span>Để biết bạn thuộc cơ sở nào. Zalo hỏi bạn cho phép, chỉ lần đầu trên mỗi tài khoản Zalo.</span>
+                </div>
+              </li>
+              <li className="muted">
+                <Icon name="block" stroke={1.75} />
+                <div>
+                  <b>Không truy cập</b>
+                  <span>Tin nhắn, danh bạ và bạn bè Zalo của bạn.</span>
+                </div>
+              </li>
+            </ul>
+            <div className="terms-f">
+              <Agree checked={agreed} onChange={setAgreed} onOpen={setDoc} />
+              <button
+                type="button"
+                className="btn btn-primary btn-block"
+                style={{ minHeight: 48 }}
+                disabled={!agreed}
+                onClick={() => {
+                  setIntro(undefined)
+                  if (intro === 'pre') zalo()
+                }}
+              >
+                {intro === 'pre' ? 'Đã hiểu, mở Zalo' : 'Đã hiểu'}
+              </button>
+              {intro === 'pre' && (
+                <button type="button" className="btn btn-ghost btn-block" onClick={() => setIntro(undefined)}>
+                  Để sau
+                </button>
+              )}
+            </div>
+          </Sheet>
+        )
       )}
     </Screen>
   )
@@ -221,13 +248,26 @@ const unknown = (access_token: string, e: ApiError): Unknown => ({
 
 const BLANK = { name: '', phone_number: '', place_name: '', maps_url: '' }
 
-function Register({ unknown, onBack, onApproved }: { unknown: Unknown; onBack: () => void; onApproved: () => void }) {
+function Register({
+  unknown,
+  onBack,
+  onApproved,
+  onOpen,
+  doc,
+}: {
+  unknown: Unknown
+  onBack: () => void
+  onApproved: () => void
+  onOpen: (doc?: Doc) => void
+  doc?: Doc
+}) {
   const [sent, setSent] = useState(unknown.registration)
   const [editing, setEditing] = useState(sent?.status !== 'pending')
   const [f, setF] = useState(sent ? { ...sent, maps_url: sent.maps_url || '' } : BLANK)
   const [errors, setErrors] = useState<Record<string, string[]>>({})
   const [error, setError] = useState('')
   const [waiting, setWaiting] = useState(false)
+  const [agreed, setAgreed] = useState(false) // asked again on every send: hueni-api records each one
   const set = (p: Partial<typeof f>) => setF((x) => ({ ...x, ...p }))
 
   async function submit(e: React.FormEvent) {
@@ -239,7 +279,7 @@ function Register({ unknown, onBack, onApproved }: { unknown: Unknown; onBack: (
       const res = await api<{ registration: Registration }>('/registration', {
         method: sent?.status === 'pending' ? 'PATCH' : 'POST',
         headers: { 'X-Registration-Token': unknown.registration_token },
-        body: { registration: f },
+        body: { registration: { ...f, terms_version: TERMS_VERSION } },
       })
       setSent(res.registration)
       setEditing(false)
@@ -316,7 +356,20 @@ function Register({ unknown, onBack, onApproved }: { unknown: Unknown; onBack: (
                 <input {...p} type="url" value={f.maps_url} onChange={(e) => set({ maps_url: e.target.value })} />
               )}
             </Field>
-            <button type="submit" className="btn btn-primary btn-block" style={{ minHeight: 48 }} disabled={waiting}>
+            <p className="help">
+              <b>Dữ liệu khách:</b> khi nhập họ tên, số điện thoại của khách, bạn cần có lý do hợp pháp (hợp đồng lưu
+              trú, khai báo lưu trú) và cho khách biết. hueni chỉ xử lý dữ liệu này cho cơ sở của bạn, không bán, không
+              dùng để quảng cáo.
+            </p>
+            <Agree checked={agreed} onChange={setAgreed} onOpen={onOpen}>
+              , và cam kết trên về dữ liệu khách
+            </Agree>
+            <button
+              type="submit"
+              className="btn btn-primary btn-block"
+              style={{ minHeight: 48 }}
+              disabled={waiting || !agreed}
+            >
               {waiting && <Spinner />}
               {sent?.status === 'pending' ? 'Lưu thay đổi' : 'Gửi yêu cầu'}
             </button>
@@ -326,6 +379,7 @@ function Register({ unknown, onBack, onApproved }: { unknown: Unknown; onBack: (
           </form>
         )}
       </main>
+      {doc && <Legal doc={doc} onClose={() => onOpen(undefined)} />}
     </Screen>
   )
 }

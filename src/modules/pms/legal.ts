@@ -1,0 +1,158 @@
+// Điều khoản sử dụng + Chính sách bảo mật, shown in-app (Zalo CP §4.1, §4.8).
+// ponytail: draft adapted from the design's Legal board; [placeholders] are the owner's legal entity data and block
+// release (#57). Changing a text means a new TERMS_VERSION: everyone is asked to agree again.
+
+// Date of the texts below, sent to hueni-api when the user agrees (hueni-api #206).
+export const TERMS_VERSION = '2026-11-06'
+
+export type Doc = 'terms' | 'privacy'
+type Text = { label: string; summary: string[]; sections: { title: string; paras: string[] }[] }
+
+export const LEGAL: Record<Doc, Text> = {
+  terms: {
+    label: 'Điều khoản sử dụng',
+    summary: [
+      'hueni giúp homestay quản lý đặt phòng. Cơ sở vẫn tự chịu trách nhiệm về giá, tiền thu và khai báo lưu trú.',
+      'Dữ liệu cơ sở nhập vào thuộc về cơ sở.',
+      'Chủ cơ sở chịu trách nhiệm về tài khoản nhân viên mình thêm.',
+      'Khi điều khoản thay đổi, hueni hỏi lại sự đồng ý của bạn.',
+    ],
+    sections: [
+      {
+        title: 'Phạm vi và chấp nhận',
+        paras: [
+          'Điều khoản này áp dụng giữa [Tên công ty] ("chúng tôi") và người dùng ứng dụng hueni trên Zalo, gồm chủ cơ sở lưu trú và nhân viên được thêm.',
+          'Bạn chấp nhận điều khoản khi tích ô đồng ý. Nếu không đồng ý, bạn không thể dùng hueni.',
+        ],
+      },
+      {
+        title: 'Tài khoản và đăng nhập',
+        paras: [
+          'Bạn đăng nhập bằng tài khoản Zalo. Không cho người khác dùng thiết bị đang đăng nhập.',
+          'Chủ cơ sở quyết định ai được thêm, vai trò của từng người, và có thể khoá tài khoản nhân viên bất cứ lúc nào.',
+          'Báo ngay cho chúng tôi nếu nghi ngờ tài khoản bị dùng trái phép.',
+        ],
+      },
+      {
+        title: 'Trách nhiệm của cơ sở lưu trú',
+        paras: [
+          'Cơ sở tự chịu trách nhiệm về giá phòng, đặt phòng và tiền thu ghi trong ứng dụng.',
+          'Cơ sở tự khai báo lưu trú đúng hạn và đúng thông tin. hueni nhắc việc, không làm thay nghĩa vụ này.',
+          'Khi nhập dữ liệu của khách, cơ sở phải có căn cứ hợp pháp (hợp đồng lưu trú, khai báo lưu trú) và cho khách biết.',
+        ],
+      },
+      {
+        title: 'Hành vi bị cấm',
+        paras: [
+          'Lưu hoặc gửi nội dung trái pháp luật; nhập dữ liệu cá nhân không có căn cứ hợp pháp; tìm cách xem dữ liệu của cơ sở khác; sao chép, dịch ngược hoặc làm quá tải hệ thống.',
+        ],
+      },
+      {
+        title: 'Quyền sở hữu dữ liệu',
+        paras: [
+          'Dữ liệu đặt phòng, khách, giá và báo cáo do cơ sở nhập thuộc về cơ sở. Chúng tôi chỉ xử lý dữ liệu này để cung cấp dịch vụ cho cơ sở.',
+        ],
+      },
+      {
+        title: 'Gián đoạn và giới hạn trách nhiệm',
+        paras: [
+          'Chúng tôi cố gắng giữ dịch vụ chạy liên tục và báo trước khi bảo trì. Dịch vụ có thể gián đoạn do sự cố của Zalo, nhà mạng, kênh OTA hoặc sự kiện bất khả kháng.',
+          'Trong phạm vi pháp luật cho phép, trách nhiệm bồi thường của chúng tôi không vượt quá phí dịch vụ cơ sở đã trả trong [12] tháng gần nhất.',
+        ],
+      },
+      {
+        title: 'Tạm ngưng và chấm dứt',
+        paras: [
+          'Chúng tôi có thể tạm ngưng tài khoản vi phạm điều khoản sau khi đã báo trước, trừ trường hợp khẩn cấp hoặc theo yêu cầu của cơ quan có thẩm quyền.',
+          'Khi chấm dứt dịch vụ, chủ cơ sở có [30] ngày để lấy dữ liệu. Sau đó dữ liệu bị xoá, trừ phần pháp luật yêu cầu lưu giữ.',
+        ],
+      },
+      {
+        title: 'Thay đổi điều khoản',
+        paras: [
+          'Khi thay đổi nội dung quan trọng, chúng tôi báo trong ứng dụng và hỏi lại sự đồng ý của bạn ở lần mở ứng dụng tiếp theo.',
+        ],
+      },
+      {
+        title: 'Luật áp dụng và liên hệ',
+        paras: [
+          'Điều khoản này theo pháp luật Việt Nam. Tranh chấp ưu tiên giải quyết bằng thương lượng; nếu không thành, Toà án có thẩm quyền tại [tỉnh/thành phố] giải quyết.',
+          '[Tên công ty] · [địa chỉ] · [số điện thoại / email / Zalo OA hỗ trợ].',
+        ],
+      },
+    ],
+  },
+  privacy: {
+    label: 'Chính sách bảo mật',
+    summary: [
+      'Từ Zalo, hueni lấy tên, ảnh đại diện và số điện thoại (khi bạn cho phép, để liên kết tài khoản).',
+      'Không đọc tin nhắn, danh bạ Zalo. Không bán dữ liệu. Không dùng dữ liệu để quảng cáo.',
+      'Với dữ liệu khách lưu trú, cơ sở là bên quyết định; hueni chỉ xử lý theo yêu cầu của cơ sở.',
+      'Bạn có quyền xem, sửa, xoá dữ liệu và rút lại sự đồng ý.',
+    ],
+    sections: [
+      {
+        title: 'Chúng tôi là ai',
+        paras: [
+          '[Tên công ty] là bên kiểm soát dữ liệu tài khoản của chủ cơ sở và nhân viên.',
+          'Với dữ liệu khách lưu trú, cơ sở lưu trú là bên kiểm soát; [Tên công ty] là bên xử lý, chỉ xử lý theo yêu cầu của cơ sở.',
+        ],
+      },
+      {
+        title: 'Dữ liệu chúng tôi thu thập',
+        paras: [
+          'Tên, ảnh đại diện và mã tài khoản Zalo: lấy từ Zalo khi bạn đăng nhập, để hiện trong danh sách nhân viên, giao ca, nhật ký.',
+          'Số điện thoại Zalo: chỉ khi bạn cho phép, để tìm tài khoản chủ cơ sở đã thêm cho bạn.',
+          'Đăng ký chủ cơ sở: họ tên, số điện thoại, tên homestay, link Google Maps, để xác minh trước khi duyệt.',
+          'Dữ liệu khách lưu trú do cơ sở nhập: họ tên, số điện thoại, ngày ở, tiền thu, để quản lý đặt phòng và thu tiền.',
+          'Thanh toán: chỉ số tiền và hình thức. Không lưu số thẻ ngân hàng.',
+          'Nhật ký thao tác: ai làm gì, lúc nào, để đối soát và bảo mật.',
+        ],
+      },
+      {
+        title: 'Căn cứ xử lý',
+        paras: [
+          'Dữ liệu tài khoản: sự đồng ý của bạn khi tích ô đồng ý, và để cung cấp dịch vụ.',
+          'Dữ liệu khách lưu trú: căn cứ do cơ sở xác định, gồm hợp đồng lưu trú và nghĩa vụ khai báo lưu trú.',
+          'Ô đồng ý không được tích sẵn. Chúng tôi lưu phiên bản và thời điểm bạn đồng ý.',
+        ],
+      },
+      {
+        title: 'Chia sẻ với ai',
+        paras: [
+          'Chỉ phần cần thiết cho: Zalo (đăng nhập), kênh bán phòng mà cơ sở tự kết nối, nhà cung cấp máy chủ [tên nhà cung cấp].',
+          'Cơ quan nhà nước có thẩm quyền khi pháp luật yêu cầu.',
+          'Dữ liệu được lưu tại [nơi đặt máy chủ].',
+        ],
+      },
+      {
+        title: 'Lưu trữ bao lâu',
+        paras: [
+          'Dữ liệu tài khoản: khi bạn còn dùng dịch vụ; xoá trong [30] ngày sau khi tài khoản bị xoá.',
+          'Đặt phòng, tiền thu và nhật ký của cơ sở: giữ lại khi một nhân viên xoá tài khoản, vì thuộc về cơ sở.',
+        ],
+      },
+      {
+        title: 'Quyền của bạn',
+        paras: [
+          'Bạn có quyền được biết, đồng ý hoặc rút lại sự đồng ý, xem, sửa, xoá dữ liệu, phản đối hoặc hạn chế xử lý, khiếu nại.',
+          'Rút lại sự đồng ý không ảnh hưởng việc xử lý đã làm trước đó. Sau khi rút, bạn không thể tiếp tục dùng hueni.',
+          'Gửi yêu cầu qua [số điện thoại / email / Zalo OA hỗ trợ].',
+        ],
+      },
+      {
+        title: 'Bảo mật',
+        paras: [
+          'Mã hoá đường truyền; phân quyền theo vai trò; nhân viên bị khoá không dùng được ứng dụng nữa.',
+          'Khi có sự cố lộ, mất dữ liệu, chúng tôi báo cho cơ quan chức năng và người bị ảnh hưởng trong thời hạn luật định.',
+        ],
+      },
+      {
+        title: 'Thay đổi chính sách',
+        paras: [
+          'Khi thay đổi mục đích xử lý hoặc loại dữ liệu thu thập, chúng tôi báo trong ứng dụng và hỏi lại sự đồng ý của bạn trước khi áp dụng.',
+        ],
+      },
+    ],
+  },
+}

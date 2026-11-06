@@ -1486,6 +1486,78 @@
     width: auto;
   }
 }
+// Consent (#62): a real checkbox, 44px row; the policy names are buttons inside the label.
+.pms .agree {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-height: 44px;
+  padding: 4px 0;
+  font-size: 15px;
+  line-height: 1.5;
+  cursor: pointer;
+
+  input {
+    flex: none;
+    width: 22px;
+    height: 22px;
+    margin: 1px 0 0;
+    accent-color: var(--primary);
+  }
+  button {
+    display: inline;
+    padding: 0;
+    border: 0;
+    background: none;
+    font: inherit;
+    font-weight: 600;
+    color: var(--primary);
+    text-decoration: underline;
+    cursor: pointer;
+  }
+}
+.pms .sheet.dialog .terms-f {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 20px 16px;
+}
+.pms .sheet.dialog.terms > p {
+  padding-bottom: 4px;
+}
+// Policy texts: full screen over the step that opened them.
+.pms .sheet.legal {
+  top: 0;
+  max-height: none;
+  border-radius: 0;
+  padding-top: calc(var(--zaui-safe-area-inset-top, 0px) + 16px);
+  font-size: 15px;
+  line-height: 1.55;
+
+  > * {
+    flex: none; // taller than the screen: scroll, don't squash
+  }
+  .legal-sum {
+    margin: 0;
+    padding: 12px 12px 12px 32px;
+    border-radius: 8px;
+    background: var(--muted-bg);
+  }
+  details {
+    border-top: 1px solid var(--border);
+  }
+  summary {
+    display: flex;
+    align-items: center;
+    min-height: 48px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  details p {
+    margin: 0 0 12px;
+    color: var(--text-2);
+  }
+}
 .pms-toast {
   position: fixed;
   font-family: var(--font);
