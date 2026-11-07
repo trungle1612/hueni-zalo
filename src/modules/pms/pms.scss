@@ -292,6 +292,10 @@
     font: inherit;
     text-align: left;
     cursor: pointer;
+
+    &.danger {
+      color: var(--danger);
+    }
   }
   .row-main {
     flex: 1;
@@ -1606,4 +1610,12 @@
     font-weight: 600;
     cursor: pointer;
   }
+}
+
+.pms .sheet ul.help {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 0 16px;
+  padding-left: 20px;
 }
