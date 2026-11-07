@@ -13,8 +13,5 @@
     "assets/index.1.0.0.module.js"
   ],
   "listAsyncJS": [],
-  "listCSS": [],
-  "template": {
-    "name": "zaui-menu"
-  }
+  "listCSS": []
 }
