@@ -19,19 +19,18 @@ npm run lint     # eslint src (npm run fix to autofix)
 
 No test suite. Verify changes by running the app (`npm run dev`) and, for API work, against hueni-api with an owner and a staff account.
 
-`npm run deploy` / `deploy:live` publish to Zalo via `zmp-cli` (they call `pnpm`). Never run them without explicit approval.
+`npm run deploy` / `deploy:live` publish to Zalo via `zmp-cli`. Never run them without explicit approval.
 
 ## Architecture
 
 - Entry `src/app.tsx`: zmp-ui `ZMPRouter` + `AnimationRoutes` with react-router-dom routes. Pages in `src/pages/pms/`, shared PMS components in `src/modules/pms/components/`.
-- State: zustand stores in `src/modules/pms/` (`pms.store.ts` core: places, rooms, bookings, session; plus `ops`, `guests`, `sales`, `setup` stores; `report.ts`). React Query is installed but unused.
+- State: zustand stores in `src/modules/pms/` (`pms.store.ts` core: places, rooms, bookings, session; plus `ops`, `guests`, `sales`, `setup` stores; `report.ts`).
 - **API client** `src/modules/pms/api.ts`: `api<T>(path, { method, body })` → `${API_URL}/api/v1${path}` with `Authorization: Bearer <hueni ApiToken>` (from `POST /api/v1/session`, not the Zalo access token). 401 with a token → quiet re-login (`getAccessToken()` + `POST /session`), retry once, else `signOut()`. Errors → `ApiError(message, status, code, body)` (`body.errors` per field); show the server's Vietnamese `message` as-is. `API_URL` in `src/constants/common.ts` from `VITE_API_URL`.
 - **Sign-in** `src/pages/pms/login.tsx`: `getAccessToken()` → `POST /api/v1/session`; `not_registered` → explain, then `getPhoneNumber()` token as `phone_token` to link the account created in the web admin. Session `{token, user, places[{id, slug, name, role}]}` in localStorage `pms.session`.
 - **Mock data vs API:** with `VITE_API_URL`, the daily screens go through `src/modules/pms/remote.ts` (requests; mock actions without it). Screens still on mock data are listed in `MOCK_ONLY` in `src/modules/pms/live.ts`: hidden in production builds, shown in `vite dev`. Connecting one = wire it to `api()`, delete the client copy of the rule, delete its `MOCK_ONLY` line in the same PR.
 - Roles: `owner | staff` per place; `can(place, 'manage' | 'operate')` mirrors hueni-api `allowed_to?`. The UI only hides; the API enforces.
 - Types in `pms.store.ts` mirror hueni-api `db/schema.rb`, and hueni-api shapes its `/api/v1` JSON after them. Change them together. Known drift: `hold` status (removed in hueni-api #127), room maintenance shape.
 - Styling: Tailwind 3 + `src/modules/pms/pms.scss` (CSS variables). Prettier: 120 cols, single quotes, no semicolons, trailing commas.
-- Template leftovers, not used by the PMS: `src/utils/request.ts`, `src/mock/`, `src/pages/menu|orders|info.tsx`, `README.md`, `app-config.json` values.
 
 ## Rules
 

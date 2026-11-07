@@ -34,20 +34,11 @@ module.exports = {
       },
       animation: {
         'fade-in': 'fade-in 0.5s ease-in-out',
-        'add-to-cart': 'add-to-cart 0.5s ease-in-out',
       },
       keyframes: {
         'fade-in': {
           '0%': { opacity: 0 },
           '100%': { opacity: 1 },
-        },
-        'add-to-cart': {
-          '0%': { transform: 'scale(1)' },
-          '20%': { transform: 'scale(0.95)' },
-          '50%': { transform: 'scale(1.1)' },
-          '80%': { transform: 'scale(1.05)' },
-          '90%': { transform: 'scale(1.02)' },
-          '100%': { transform: 'scale(1)' },
         },
       },
     },
@@ -56,7 +47,5 @@ module.exports = {
     preflight: false,
     aspectRatio: false,
   },
-  plugins: [
-    require('@tailwindcss/aspect-ratio'),
-  ],
+  plugins: [],
 }
