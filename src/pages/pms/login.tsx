@@ -5,7 +5,7 @@ import { getAccessToken, getPhoneNumber } from 'zmp-sdk'
 import { API_URL } from '@/constants/common'
 import { api, ApiError } from '@/modules/pms/api'
 import { acceptTerms, Agree, Field, Icon, Legal, Screen, Sheet, Spinner } from '@/modules/pms/components/ui'
-import { Doc, TERMS_VERSION } from '@/modules/pms/legal'
+import { Doc, LEGAL, TERMS_VERSION } from '@/modules/pms/legal'
 import { Session, usePms } from '@/modules/pms/pms.store'
 import zaloIcon from '@/static/images/zalo-icon.png'
 
@@ -153,6 +153,10 @@ export default function LoginPage() {
           ) : (
             <>
               <h1>Đăng nhập</h1>
+              <p>
+                hueni dành cho chủ cơ sở lưu trú và nhân viên của họ. Đăng nhập để hueni biết bạn thuộc cơ sở nào và chỉ
+                cho bạn thấy dữ liệu của cơ sở đó.
+              </p>
               <button
                 type="button"
                 className="btn btn-zalo btn-block"
@@ -183,6 +187,13 @@ export default function LoginPage() {
       </main>
       <footer className="login-foot">
         Chưa có tài khoản? Chủ cơ sở thêm nhân viên trên trang quản trị hueni, mục Nhân viên.
+        <nav aria-label="Văn bản pháp lý">
+          {(['terms', 'privacy'] as const).map((d) => (
+            <button key={d} type="button" onClick={() => setDoc(d)}>
+              {LEGAL[d].label}
+            </button>
+          ))}
+        </nav>
       </footer>
       {doc ? (
         <Legal doc={doc} onClose={() => setDoc(undefined)} />
