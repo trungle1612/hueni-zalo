@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { Navigate } from 'react-router-dom'
-import { getAccessToken, getPhoneNumber } from 'zmp-sdk'
+import { getAccessToken } from 'zmp-sdk'
 
 import { API_URL } from '@/constants/common'
 import { api, ApiError } from '@/modules/pms/api'
@@ -19,11 +19,25 @@ type Registration = {
 }
 type Unknown = { access_token: string; registration_token: string; registration: Registration | null }
 
-// A known Zalo id signs in. Otherwise, after the user has read why (Zalo's guidance: ask for the phone
-// only when needed, explained first), the Zalo phone links the owner or staff member added in the web admin.
-// getPhoneNumber needs Zalo's approval of scope.userPhonenumber. Linking records the terms the user ticked (hueni-api #206).
-const ask = (access_token: string, phone_token?: string) =>
-  api<Session>('/session', { body: { access_token, phone_token, terms_version: phone_token && TERMS_VERSION } })
+// A known Zalo id signs in. An unknown one can only ask to register as an owner (no phone linking).
+const ask = (access_token: string) => api<Session>('/session', { body: { access_token } })
+
+// Terms ticked on this device: the popup isn't shown again until TERMS_VERSION changes.
+const TERMS_KEY = 'pms.terms'
+const termsAccepted = () => {
+  try {
+    return localStorage.getItem(TERMS_KEY) === TERMS_VERSION
+  } catch {
+    return false
+  }
+}
+const rememberTerms = () => {
+  try {
+    localStorage.setItem(TERMS_KEY, TERMS_VERSION)
+  } catch {
+    // private mode: ask again next time
+  }
+}
 
 // Zalo identity only (PRODUCT.md: no password in the mini app); the canvas's phone + password form is left out.
 export default function LoginPage() {
@@ -33,8 +47,8 @@ export default function LoginPage() {
   const [linking, setLinking] = useState<Unknown>() // a Zalo account hueni doesn't know yet
   const [registering, setRegistering] = useState(false)
   // What hueni takes from Zalo, with the agreement: shown on open ('info'), or on a tap before agreeing ('pre').
-  const [intro, setIntro] = useState<'info' | 'pre' | undefined>('info')
-  const [agreed, setAgreed] = useState(false)
+  const [agreed, setAgreed] = useState(termsAccepted)
+  const [intro, setIntro] = useState<'info' | 'pre' | undefined>(agreed ? undefined : 'info')
   const [doc, setDoc] = useState<Doc>() // a policy text open over the current step
   if (signedIn) return <Navigate to="/" replace />
 
@@ -58,7 +72,7 @@ export default function LoginPage() {
           .catch(() => {}) // the sign-in sheet asks again
       actions.signIn(session)
     } catch (e) {
-      // First not_registered opens the linking step; still unknown with the phone → Đăng ký chủ nhà.
+      // not_registered opens the linking step (Đăng ký chủ nhà).
       if (e instanceof ApiError && e.code === 'not_registered') return
       setError(e instanceof ApiError ? e.message : 'Zalo chưa cho phép đăng nhập. Thử lại.')
     } finally {
@@ -78,21 +92,6 @@ export default function LoginPage() {
         return await ask(access_token)
       } catch (e) {
         if (e instanceof ApiError && e.code === 'not_registered') setLinking(unknown(access_token, e))
-        throw e
-      }
-    })
-  }
-
-  function linkByPhone() {
-    if (!linking) return
-    run(async () => {
-      try {
-        return await ask(linking.access_token, (await getPhoneNumber()).token)
-      } catch (e) {
-        if (e instanceof ApiError && e.code === 'not_registered') {
-          setLinking(unknown(linking.access_token, e))
-          setRegistering(true)
-        }
         throw e
       }
     })
@@ -124,23 +123,13 @@ export default function LoginPage() {
             <>
               <h1>Liên kết tài khoản</h1>
               <p>
-                Tài khoản Zalo này chưa liên kết với hueni. Nếu chủ cơ sở đã thêm bạn bằng số điện thoại, hueni dùng số
-                điện thoại Zalo của bạn để tìm và liên kết tài khoản đó. Số chỉ dùng để liên kết, không hiện cho ai
-                khác.
+                Tài khoản Zalo này chưa liên kết với hueni. Nếu bạn là nhân viên, nhờ chủ cơ sở thêm bạn trên trang quản
+                trị hueni.
               </p>
               <button
                 type="button"
                 className="btn btn-primary btn-block"
                 style={{ minHeight: 48 }}
-                disabled={waiting}
-                onClick={linkByPhone}
-              >
-                {waiting && <Spinner />}
-                {waiting ? 'Đang chờ Zalo xác nhận…' : 'Dùng số điện thoại Zalo'}
-              </button>
-              <button
-                type="button"
-                className="btn btn-ghost btn-block"
                 disabled={waiting}
                 onClick={() => setRegistering(true)}
               >
@@ -200,7 +189,7 @@ export default function LoginPage() {
       ) : (
         intro && (
           <Sheet className="dialog" title="hueni cần thông tin của bạn" onClose={() => setIntro(undefined)}>
-            <p>Đăng nhập gồm 2 bước: xác nhận trên Zalo, rồi cho phép dùng số điện thoại Zalo.</p>
+            <p>Đăng nhập bằng cách xác nhận trên Zalo.</p>
             <ul>
               <li>
                 <Icon name="user" stroke={1.75} />
@@ -212,8 +201,8 @@ export default function LoginPage() {
               <li>
                 <Icon name="phone" stroke={1.75} />
                 <div>
-                  <b>Số điện thoại · lấy từ Zalo</b>
-                  <span>Để biết bạn thuộc cơ sở nào. Zalo hỏi bạn cho phép, chỉ lần đầu trên mỗi tài khoản Zalo.</span>
+                  <b>Số điện thoại · bạn tự nhập</b>
+                  <span>Chỉ khi đăng ký chủ cơ sở, để hueni gọi xác minh. hueni không lấy số từ Zalo.</span>
                 </div>
               </li>
               <li className="muted">
@@ -232,6 +221,7 @@ export default function LoginPage() {
                 style={{ minHeight: 48 }}
                 disabled={!agreed}
                 onClick={() => {
+                  rememberTerms()
                   setIntro(undefined)
                   if (intro === 'pre') zalo()
                 }}
