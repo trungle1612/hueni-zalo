@@ -19,8 +19,10 @@ type Registration = {
 }
 type Unknown = { access_token: string; registration_token: string; registration: Registration | null }
 
-// A known Zalo id signs in. An unknown one can only ask to register as an owner (no phone linking).
+// A known Zalo id signs in. An unknown one enters a mã mời from the owner (hueni-api#211) or asks to register as an owner.
 const ask = (access_token: string) => api<Session>('/session', { body: { access_token } })
+const join = (access_token: string, invite_code: string) =>
+  api<Session>('/session', { body: { access_token, invite_code, terms_version: TERMS_VERSION } })
 
 // Terms ticked on this device: the popup isn't shown again until TERMS_VERSION changes.
 const TERMS_KEY = 'pms.terms'
@@ -46,6 +48,7 @@ export default function LoginPage() {
   const [error, setError] = useState('')
   const [linking, setLinking] = useState<Unknown>() // a Zalo account hueni doesn't know yet
   const [registering, setRegistering] = useState(false)
+  const [code, setCode] = useState('')
   // What hueni takes from Zalo, with the agreement: shown on open ('info'), or on a tap before agreeing ('pre').
   const [agreed, setAgreed] = useState(termsAccepted)
   const [intro, setIntro] = useState<'info' | 'pre' | undefined>(agreed ? undefined : 'info')
@@ -63,8 +66,7 @@ export default function LoginPage() {
     setError('')
     try {
       const session = await step()
-      if (!session.places.length)
-        return setError('Tài khoản chưa thuộc cơ sở nào. Nhờ chủ cơ sở thêm bạn trên trang quản trị hueni.')
+      if (!session.places.length) return setError('Tài khoản chưa thuộc cơ sở nào. Xin chủ cơ sở mã mời.')
       // A known Zalo id just ticked the box here: record it, or the app asks again right away.
       if (session.user.terms_version !== TERMS_VERSION)
         await acceptTerms(session.token)
@@ -122,13 +124,42 @@ export default function LoginPage() {
           {linking ? (
             <>
               <h1>Liên kết tài khoản</h1>
-              <p>
-                Tài khoản Zalo này chưa liên kết với hueni. Nếu bạn là nhân viên, nhờ chủ cơ sở thêm bạn trên trang quản
-                trị hueni.
-              </p>
+              <p>Tài khoản Zalo này chưa có trong hueni. Nhân viên: nhập mã mời chủ cơ sở gửi cho bạn.</p>
+              <form
+                style={{ display: 'flex', flexDirection: 'column', gap: 12 }}
+                onSubmit={(e) => {
+                  e.preventDefault()
+                  run(() => join(linking.access_token, code))
+                }}
+              >
+                <Field label="Mã mời">
+                  {(p) => (
+                    <input
+                      {...p}
+                      className="invite-input"
+                      autoCapitalize="characters"
+                      autoComplete="off"
+                      spellCheck={false}
+                      placeholder="VD: 7K2P-9QXM"
+                      value={code}
+                      onChange={(e) => setCode(e.target.value.toUpperCase())}
+                    />
+                  )}
+                </Field>
+                <button
+                  type="submit"
+                  className="btn btn-primary btn-block"
+                  style={{ minHeight: 48 }}
+                  disabled={waiting || code.replace(/[^A-Z0-9]/g, '').length < 8}
+                >
+                  {waiting && <Spinner />}
+                  Vào hueni
+                </button>
+              </form>
+              <p className="help">Chủ cơ sở mới chưa có mã: đăng ký, hueni gọi xác minh rồi duyệt.</p>
               <button
                 type="button"
-                className="btn btn-primary btn-block"
+                className="btn btn-block"
                 style={{ minHeight: 48 }}
                 disabled={waiting}
                 onClick={() => setRegistering(true)}
@@ -175,7 +206,7 @@ export default function LoginPage() {
         </div>
       </main>
       <footer className="login-foot">
-        Chưa có tài khoản? Chủ cơ sở thêm nhân viên trên trang quản trị hueni, mục Nhân viên.
+        Nhân viên chưa có tài khoản? Xin chủ cơ sở mã mời (Thêm → Nhân viên).
         <nav aria-label="Văn bản pháp lý">
           {(['terms', 'privacy'] as const).map((d) => (
             <button key={d} type="button" onClick={() => setDoc(d)}>

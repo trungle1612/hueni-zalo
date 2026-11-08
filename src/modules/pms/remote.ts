@@ -20,7 +20,7 @@ import {
   usePms,
 } from './pms.store'
 import { addGroupRooms, createGroup, Group, Site, SITE_DEFAULT, useSales } from './sales.store'
-import { Policy, RefundRequest, Season, Staff, Surcharge, useSetup } from './setup.store'
+import { Invite, Policy, RefundRequest, Season, Staff, Surcharge, useSetup } from './setup.store'
 
 // Booking and front-desk actions for the screens connected to hueni-api (#34, #35, wiki Mini-App-API).
 // With API_URL every action is a request and the server's answer replaces the local copy; without it
@@ -803,14 +803,16 @@ const failed = (r: Linked): Result => (typeof r === 'string' ? r : undefined)
 
 export async function loadStaff(placeId: number): Promise<Result> {
   if (!API_URL) return
-  useSetup.setState({ staff: [], refundRequests: [] })
+  useSetup.setState({ staff: [], invites: [], refundRequests: [] })
   try {
-    const [{ members }, { refund_requests }] = await Promise.all([
+    const [{ members }, { invites }, { refund_requests }] = await Promise.all([
       api<{ members: Staff[] }>(`/places/${placeId}/memberships`),
+      api<{ invites: Invite[] }>(`/places/${placeId}/invites`),
       api<{ refund_requests: RefundRequest[] }>(`/places/${placeId}/refund_requests`),
     ])
     useSetup.setState({
       staff: members.map((m) => strip<Staff>(m)),
+      invites,
       refundRequests: refund_requests.map((r) => strip<RefundRequest>(r)),
     })
   } catch (e) {
@@ -819,12 +821,27 @@ export async function loadStaff(placeId: number): Promise<Result> {
 }
 
 export const staffRemote = {
-  // permissions left out = the server's default (discount).
-  invite: async (placeId: number, m: { name: string; phone_number: string; role: Role }): Promise<Linked> => {
-    if (API_URL) return member(`/places/${placeId}/memberships`, { member: m })
-    const id = Date.now()
-    setStaff({ ...m, id, user_id: id, phone: m.phone_number, permissions: ['discount'], locked: false, invited: true })
-    return {}
+  // Mã mời (hueni-api#211): a staff code, 7 days, one use. Mock: a made-up one.
+  invite: async (placeId: number): Promise<Invite | string> => {
+    let invite: Invite
+    try {
+      invite = API_URL
+        ? (await api<{ invite: Invite }>(`/places/${placeId}/invites`, { method: 'POST' })).invite
+        : { id: Date.now(), code: 'MOCK-7K2P', role: 'staff', expires_at: day(7), uses_left: 1 }
+    } catch (e) {
+      return message(e)
+    }
+    useSetup.setState((s) => ({ invites: [...s.invites, invite] }))
+    return invite
+  },
+  revoke: async (id: number): Promise<Result> => {
+    if (API_URL)
+      try {
+        await api(`/invites/${id}`, { method: 'DELETE' })
+      } catch (e) {
+        return message(e)
+      }
+    useSetup.setState((s) => ({ invites: s.invites.filter((x) => x.id !== id) }))
   },
   save: async (id: number, m: { role: Role; permissions: Perm[] }): Promise<Result> =>
     API_URL ? failed(await member(`/memberships/${id}`, { member: m }, 'PATCH')) : mockStaff(id, m),

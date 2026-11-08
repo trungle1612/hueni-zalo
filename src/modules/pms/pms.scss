@@ -1395,6 +1395,12 @@
       color: var(--text-2);
     }
   }
+  // Mã mời: typed letter by letter from a Zalo message.
+  .login .invite-input {
+    font-size: 20px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+  }
   .login .btn.link {
     align-self: flex-start;
     padding: 0;

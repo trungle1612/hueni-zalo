@@ -81,4 +81,22 @@
       border-top: 0;
     }
   }
+  // Mã mời: easy to read out loud, letter by letter.
+  .row-main.invite {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0;
+    font-family: inherit;
+  }
+  .invite-code {
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    font-variant-numeric: tabular-nums;
+  }
+  .invite-code.big {
+    margin: 8px 0;
+    font-size: 32px;
+    text-align: center;
+    user-select: all;
+  }
 }

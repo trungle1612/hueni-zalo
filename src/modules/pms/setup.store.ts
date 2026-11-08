@@ -23,6 +23,8 @@ export type Staff = {
   invited: boolean
   last_active_at?: string
 }
+// Mã mời (hueni-api#211): a staff code for this homestay; whoever enters it on Liên kết tài khoản joins as staff.
+export type Invite = { id: number; code: string; role: Role; expires_at: string; uses_left: number }
 // Chờ duyệt: a refund asked by staff without the refund right.
 export type RefundRequest = {
   id: number
@@ -71,6 +73,7 @@ type State = {
   longStay: boolean
   policy: Policy
   staff: Staff[]
+  invites: Invite[]
   audit: AuditEntry[]
   refundRequests: RefundRequest[]
 }
@@ -88,6 +91,7 @@ export const useSetup = create<State>(() => ({
   ],
   longStay: true,
   policy: 'mid',
+  invites: [],
   staff: [
     {
       id: 1,
