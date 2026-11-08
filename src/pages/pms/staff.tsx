@@ -5,9 +5,18 @@ import { openShareSheet } from 'zmp-sdk'
 
 import { API_URL } from '@/constants/common'
 import { AppBar, Badge, Field, Screen, Sec, Segmented, Sheet, toast, useCurrent } from '@/modules/pms/components/ui'
-import { can, fmtTime, money, PAY_METHOD, Role, usePms } from '@/modules/pms/pms.store'
+import { can, fmtDate, fmtTime, money, PAY_METHOD, Role, usePms } from '@/modules/pms/pms.store'
 import { loadStaff, staffRemote, useActivity } from '@/modules/pms/remote'
-import { AuditEntry, AuditKind, PERMS, RefundRequest, ROLE_NAME, Staff, useSetup } from '@/modules/pms/setup.store'
+import {
+  AuditEntry,
+  AuditKind,
+  Invite,
+  PERMS,
+  RefundRequest,
+  ROLE_NAME,
+  Staff,
+  useSetup,
+} from '@/modules/pms/setup.store'
 
 import { Denied } from './rates'
 
@@ -90,17 +99,29 @@ export default function StaffPage() {
 }
 
 function People() {
+  const { place } = useCurrent()
   const staff = useSetup((s) => s.staff)
+  const invites = useSetup((s) => s.invites)
   const me = usePms((s) => s.user.id)
   const [open, setOpen] = useState<Staff>()
-  const [inviting, setInviting] = useState(false)
+  const [code, setCode] = useState<Invite>()
   const [link, setLink] = useState<{ name: string; url: string }>()
+
+  async function invite() {
+    const r = await staffRemote.invite(place.id)
+    if (typeof r === 'string') return toast(r)
+    setCode(r)
+  }
+
+  async function revoke(i: Invite) {
+    toast((await staffRemote.revoke(i.id)) || `Đã thu hồi mã ${i.code}`)
+  }
 
   return (
     <Sec
       title={`${staff.length} tài khoản`}
       aside={
-        <button type="button" className="link" onClick={() => setInviting(true)}>
+        <button type="button" className="link" onClick={invite}>
           + Mời nhân viên
         </button>
       }
@@ -136,6 +157,28 @@ function People() {
           </button>
         ))}
       </div>
+      {invites.length > 0 && (
+        <>
+          <h3 className="lbl" style={{ margin: '16px 0 8px' }}>
+            Mã mời chưa dùng
+          </h3>
+          <div className="panel">
+            {invites.map((i) => (
+              <div key={i.id} className="row">
+                <button type="button" className="row-main invite" onClick={() => setCode(i)}>
+                  <span className="t1 invite-code">{i.code}</span>
+                  <span className="t2">
+                    Nhân viên · còn {i.uses_left} lần · hết hạn {fmtDate(i.expires_at)}
+                  </span>
+                </button>
+                <button type="button" className="btn btn-sm" onClick={() => revoke(i)}>
+                  Thu hồi
+                </button>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
       {open && (
         <PersonSheet
           p={open}
@@ -144,7 +187,7 @@ function People() {
           onClose={() => setOpen(undefined)}
         />
       )}
-      {inviting && <InviteSheet onLink={(name, url) => setLink({ name, url })} onClose={() => setInviting(false)} />}
+      {code && <CodeSheet invite={code} onClose={() => setCode(undefined)} />}
       {link && <LinkSheet {...link} onClose={() => setLink(undefined)} />}
     </Sec>
   )
@@ -278,52 +321,35 @@ function PersonSheet({
   )
 }
 
-function InviteSheet({ onLink, onClose }: { onLink: (name: string, url: string) => void; onClose: () => void }) {
+// Mã mời: whoever has it joins as staff, so it goes only to the right person; never in a URL or a log.
+function CodeSheet({ invite, onClose }: { invite: Invite; onClose: () => void }) {
   const { place } = useCurrent()
-  const [name, setName] = useState('')
-  const [phone, setPhone] = useState('')
-  const [role, setRole] = useState<Role>('staff')
-  const [error, setError] = useState<string>()
-
-  async function send() {
-    const r = await staffRemote.invite(place.id, {
-      name: name.trim(),
-      phone_number: phone.replace(/[^\d+]/g, ''),
-      role,
-    })
-    if (typeof r === 'string') return setError(r)
-    onClose()
-    toast(`Đã thêm ${name.trim()}`)
-    if (r.setup_link) onLink(name.trim(), r.setup_link)
-  }
+  const until = fmtDate(invite.expires_at)
+  const text = `Mã mời vào hueni (${place.name}): ${invite.code}\nMở hueni trên Zalo, bấm Đăng nhập bằng Zalo rồi nhập mã. Hết hạn ${until}.`
+  const copy = () =>
+    navigator.clipboard
+      .writeText(invite.code)
+      .then(() => toast('Đã sao chép mã'))
+      .catch(() => toast('Không sao chép được. Đọc mã cho nhân viên.'))
 
   return (
-    <Sheet title="Mời nhân viên" onClose={onClose}>
-      <Field label="Tên">{(p) => <input {...p} value={name} onChange={(e) => setName(e.target.value)} />}</Field>
-      <Field label="Số điện thoại">
-        {(p) => (
-          <input
-            {...p}
-            type="tel"
-            inputMode="tel"
-            placeholder="09xx xxx xxx"
-            value={phone}
-            onChange={(e) => setPhone(e.target.value)}
-          />
-        )}
-      </Field>
-      <div className="field">
-        <span className="lbl">Vai trò</span>
-        <Segmented label="Vai trò" value={role} options={ROLES} onChange={setRole} />
-      </div>
-      <p className="help">Sau khi thêm, gửi link qua Zalo cho người này. Link dùng một lần, hết hạn sau 7 ngày.</p>
-      {error && (
-        <div className="alert" role="alert">
-          {error}
-        </div>
-      )}
-      <button type="button" className="btn btn-primary btn-block" disabled={!name.trim() || !phone} onClick={send}>
-        Thêm nhân viên
+    <Sheet title="Mã mời nhân viên" onClose={onClose}>
+      <p className="invite-code big" aria-label={`Mã mời ${invite.code.split('').join(' ')}`}>
+        {invite.code}
+      </p>
+      <p className="help">
+        Nhân viên mở hueni trên Zalo, bấm Đăng nhập bằng Zalo rồi nhập mã này. Dùng {invite.uses_left} lần, hết hạn{' '}
+        {until}. Chỉ gửi cho đúng người.
+      </p>
+      <button
+        type="button"
+        className="btn btn-primary btn-block"
+        onClick={() => openShareSheet({ type: 'text', data: { text } }).catch(copy)}
+      >
+        Gửi qua Zalo
+      </button>
+      <button type="button" className="btn btn-block" onClick={copy}>
+        Sao chép mã
       </button>
       <button type="button" className="btn btn-ghost btn-block" onClick={onClose}>
         Đóng
