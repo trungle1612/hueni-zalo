@@ -651,6 +651,26 @@
     }
   }
 
+  // the unread count on the bell (Hôm nay → Thông báo, #71)
+  .bell {
+    position: relative;
+
+    b {
+      position: absolute;
+      top: 4px;
+      right: 2px;
+      min-width: 18px;
+      height: 18px;
+      padding: 0 5px;
+      box-sizing: border-box;
+      border-radius: 9px;
+      background: var(--primary);
+      color: #fff;
+      font-size: 11px;
+      line-height: 18px;
+      text-align: center;
+    }
+  }
   // ---------- tabs and groups ----------
   .seg {
     flex: none;

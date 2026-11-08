@@ -19,6 +19,7 @@ import HousekeepingPage from './pages/pms/housekeeping'
 import LoginPage from './pages/pms/login'
 import MessagesPage from './pages/pms/messages'
 import MorePage from './pages/pms/more'
+import NotificationsPage from './pages/pms/notifications'
 import RatesPage from './pages/pms/rates'
 import RegistrationPage from './pages/pms/registration'
 import ReportPage from './pages/pms/report'
@@ -85,6 +86,7 @@ const MyApp = () => {
             <Route path="/rates" element={live('/rates', <RatesPage />)} />
             <Route path="/staff" element={live('/staff', <StaffPage />)} />
             <Route path="/search" element={<SearchPage />} />
+            <Route path="/notifications" element={<NotificationsPage />} />
             <Route path="/bookings/new" element={<BookingFormPage />} />
             <Route path="/bookings/:id" element={<BookingPage />} />
             <Route path="/bookings/:id/edit" element={<BookingFormPage />} />
