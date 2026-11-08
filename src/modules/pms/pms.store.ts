@@ -755,7 +755,7 @@ type State = {
 export type Session = {
   token: string
   expires_at?: string
-  user: { id?: number; name: string; terms_version?: string | null }
+  user: { id?: number; name: string; terms_version?: string | null; notifications_off?: string[] }
   places: Place[]
 }
 const MOCK_SESSION: Session = { token: '', user: { name: 'Chị Hoa' }, places }

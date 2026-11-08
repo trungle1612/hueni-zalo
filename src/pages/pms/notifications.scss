@@ -1,0 +1,121 @@
+// Thông báo (#71): only what pms.scss doesn't already have.
+.pms {
+  .nt-tabs .nt-all {
+    margin-left: auto;
+    color: var(--primary);
+    font-weight: 600;
+
+    &:disabled {
+      color: var(--text-2);
+      opacity: 0.6;
+      cursor: default;
+    }
+  }
+  .nt-grp {
+    margin: 0;
+    padding: 16px 16px 8px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-2);
+  }
+  .nt-list {
+    margin: 0 16px;
+  }
+  .nt {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    width: 100%;
+    padding: 12px;
+    border: 0;
+    border-top: 1px solid var(--border);
+    background: var(--surface);
+    font: inherit;
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+
+    &:first-child {
+      border-top: 0;
+    }
+    &.unread {
+      background: #fbf7fa;
+    }
+  }
+  .nt-ic {
+    flex: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+    background: var(--muted-bg);
+    color: var(--text-2);
+
+    &.warn {
+      background: var(--warn-bg);
+      color: var(--warn);
+    }
+    &.err {
+      background: var(--danger-bg);
+      color: var(--danger);
+    }
+    &.pos {
+      background: var(--pos-bg);
+      color: var(--pos);
+    }
+    &.info {
+      background: var(--info-bg);
+      color: var(--info);
+    }
+  }
+  .nt-t {
+    display: block;
+    font-weight: 600;
+  }
+  .nt-b {
+    display: block;
+    font-size: 14px;
+    color: var(--text);
+  }
+  .nt-m {
+    display: block;
+    margin-top: 2px;
+    font-size: 13px;
+    color: var(--text-2);
+  }
+  .nt-dot {
+    flex: none;
+    width: 8px;
+    height: 8px;
+    margin-top: 6px;
+    border-radius: 4px;
+    background: var(--primary);
+  }
+  .nt-keep {
+    padding: 16px;
+    text-align: center;
+  }
+  .nt-kicker {
+    margin: 0;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    color: var(--primary);
+  }
+  .nt-sheet {
+    h3 {
+      margin: 0 0 4px;
+      font-size: 15px;
+    }
+    ul,
+    ol {
+      margin: 0;
+      padding-left: 20px;
+    }
+    p {
+      margin: 0;
+    }
+  }
+}

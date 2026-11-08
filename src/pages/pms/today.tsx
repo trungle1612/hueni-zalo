@@ -4,6 +4,7 @@ import React, { useState } from 'react'
 import { StayKind, StaySheet, useStartStay } from '@/modules/pms/components/stay-sheet'
 import { A, AppBar, Badge, Icon, PlaceSub, Screen, Sec, todayLine, useCurrent } from '@/modules/pms/components/ui'
 import { isLive } from '@/modules/pms/live'
+import { useNotifications } from '@/modules/pms/notifications'
 import { undeclaredGuests } from '@/modules/pms/ops.store'
 import {
   arrivalDate,
@@ -37,6 +38,7 @@ export default function TodayPage() {
   const { bookings, feeds, rooms: allRooms } = usePms()
   const { place, rooms, roomOf } = useCurrent()
   const [tomorrow, setTomorrow] = useState(false)
+  const unread = useNotifications(place.id).notes?.filter((n) => n.unread).length || 0
   const [sheet, setSheet] = useState<{ kind: StayKind; id: number }>()
   const startStay = useStartStay((kind, id) => setSheet({ kind, id }))
 
@@ -151,6 +153,14 @@ export default function TodayPage() {
         title="Hôm nay"
         sub={<PlaceSub prefix={tomorrow ? `Xem trước ${fmtDay(t1)}/${t1.slice(0, 4)}` : todayLine()} />}
       >
+        <A
+          className="icon-btn bell"
+          to="/notifications"
+          aria-label={unread ? `Thông báo, ${unread} chưa đọc` : 'Thông báo'}
+        >
+          <Icon name="bell" />
+          {unread > 0 && <b aria-hidden="true">{unread > 99 ? '99+' : unread}</b>}
+        </A>
         <A className="icon-btn" to="/search" aria-label="Tìm đặt phòng">
           <Icon name="search" />
         </A>
