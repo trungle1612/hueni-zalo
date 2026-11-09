@@ -5,7 +5,7 @@ import { API_URL } from '@/constants/common'
 import { api, ApiError } from './api'
 import { usePms } from './pms.store'
 
-// Thông báo (#71, hueni-api#213): the inbox is built by hueni-api; the app only shows it and sends read marks.
+// Thông báo (#71, hueni-api#213, #216): the inbox is built by hueni-api; the app only shows it and sends read marks.
 
 export type NoteType = 'book' | 'money' | 'reg' | 'room' | 'approve' | 'news' | 'channel'
 export type Announcement = {
@@ -24,7 +24,7 @@ export type Note = {
   icon: 'book' | 'money' | 'alert' | 'room' | 'team' | 'news'
   tone: '' | 'err' | 'warn' | 'pos' | 'info'
   title: string
-  body: string
+  body: string | null
   source: string
   at: string
   urgent: boolean
@@ -77,7 +77,15 @@ const MOCK: Note[] = [
       title: 'Xuất hoá đơn điện tử từ Phiếu tính tiền',
       intro: 'Khi khách trả phòng, bạn xuất hoá đơn ngay trong app.',
       blocks: [
-        { h: 'Có gì mới', ordered: false, items: ['Tự điền tiền phòng và dịch vụ', 'Gửi hoá đơn qua email'] },
+        {
+          h: 'Có gì mới',
+          ordered: false,
+          items: [
+            'Tự điền tiền phòng và dịch vụ',
+            'Gửi hoá đơn qua email',
+            'Xem hướng dẫn: https://hueni.vn/huong-dan.',
+          ],
+        },
         { h: 'Cách dùng', ordered: true, items: ['Mở đặt phòng, chọn Phiếu tính tiền', 'Bấm Xuất hoá đơn'] },
       ],
       note: null,
@@ -100,7 +108,7 @@ const MOCK: Note[] = [
     announcement: null,
   },
   {
-    key: 'v1',
+    key: 'n1',
     type: 'book',
     icon: 'book',
     tone: '',
@@ -114,7 +122,7 @@ const MOCK: Note[] = [
     announcement: null,
   },
   {
-    key: 'v2',
+    key: 'n2',
     type: 'room',
     icon: 'room',
     tone: '',
