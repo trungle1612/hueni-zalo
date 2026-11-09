@@ -152,7 +152,7 @@ export default function NotificationsPage() {
                   key={n.key}
                   type="button"
                   className={n.unread ? 'nt unread' : 'nt'}
-                  aria-label={`${n.unread ? 'Chưa đọc. ' : ''}${n.title}. ${n.body}`}
+                  aria-label={`${n.unread ? 'Chưa đọc. ' : ''}${n.title}.${n.body ? ` ${n.body}` : ''}`}
                   onClick={() => tap(n)}
                 >
                   <span className={`nt-ic ${n.tone}`} aria-hidden="true">
