@@ -2,6 +2,7 @@ import './notifications.scss'
 
 import dayjs from 'dayjs'
 import React, { useState } from 'react'
+import { openWebview } from 'zmp-sdk'
 import { useNavigate } from 'zmp-ui'
 
 import { AppBar, Icon, Screen, Sheet, toast, useCurrent } from '@/modules/pms/components/ui'
@@ -38,6 +39,33 @@ const groupOf = (at: string) => {
   return d.isSame(dayjs(), 'day') ? 'Hôm nay' : d.isSame(dayjs().subtract(1, 'day'), 'day') ? 'Hôm qua' : 'Trước đó'
 }
 const when = (at: string) => (groupOf(at) === 'Trước đó' ? dayjs(at).format('DD/MM') : dayjs(at).format('HH:mm'))
+
+// Links written in an announcement, tappable. Zalo's webview ignores target=_blank, so they open with openWebview.
+const URL_RE = /(https?:\/\/[^\s]*[^\s.,;:!?)])/
+function Linked({ text }: { text: string }) {
+  return (
+    <>
+      {text.split(URL_RE).map((part, i) =>
+        i % 2 ? (
+          <a
+            key={i}
+            href={part}
+            onClick={(e) => {
+              e.preventDefault()
+              openWebview({ url: part, config: { style: 'normal' } }).catch(() =>
+                window.open(part, '_blank', 'noopener'),
+              )
+            }}
+          >
+            {part}
+          </a>
+        ) : (
+          part
+        ),
+      )}
+    </>
+  )
+}
 
 // Thông báo (#71): what happened at the homestay in the last 30 days, built by hueni-api (#213).
 export default function NotificationsPage() {
@@ -160,18 +188,30 @@ export default function NotificationsPage() {
       {open?.announcement && (
         <Sheet title={open.announcement.title} onClose={() => setOpen(undefined)} className="nt-sheet">
           <p className="nt-kicker">{open.announcement.kicker}</p>
-          {open.announcement.intro && <p>{open.announcement.intro}</p>}
+          {open.announcement.intro && (
+            <p>
+              <Linked text={open.announcement.intro} />
+            </p>
+          )}
           {open.announcement.blocks.map((b, i) => (
             <div key={i}>
               {b.h && <h3>{b.h}</h3>}
               {React.createElement(
                 b.ordered ? 'ol' : 'ul',
                 null,
-                b.items.map((x, j) => <li key={j}>{x}</li>),
+                b.items.map((x, j) => (
+                  <li key={j}>
+                    <Linked text={x} />
+                  </li>
+                )),
               )}
             </div>
           ))}
-          {open.announcement.note && <p className="notice info">{open.announcement.note}</p>}
+          {open.announcement.note && (
+            <p className="notice info">
+              <Linked text={open.announcement.note} />
+            </p>
+          )}
           {open.announcement.cta && open.announcement.cta_path && (
             <button
               type="button"

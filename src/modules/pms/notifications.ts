@@ -77,7 +77,15 @@ const MOCK: Note[] = [
       title: 'Xuất hoá đơn điện tử từ Phiếu tính tiền',
       intro: 'Khi khách trả phòng, bạn xuất hoá đơn ngay trong app.',
       blocks: [
-        { h: 'Có gì mới', ordered: false, items: ['Tự điền tiền phòng và dịch vụ', 'Gửi hoá đơn qua email'] },
+        {
+          h: 'Có gì mới',
+          ordered: false,
+          items: [
+            'Tự điền tiền phòng và dịch vụ',
+            'Gửi hoá đơn qua email',
+            'Xem hướng dẫn: https://hueni.vn/huong-dan.',
+          ],
+        },
         { h: 'Cách dùng', ordered: true, items: ['Mở đặt phòng, chọn Phiếu tính tiền', 'Bấm Xuất hoá đơn'] },
       ],
       note: null,
