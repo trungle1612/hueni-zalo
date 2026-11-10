@@ -5,8 +5,8 @@ import React, { useState } from 'react'
 import { openWebview } from 'zmp-sdk'
 import { useNavigate } from 'zmp-ui'
 
-import { AppBar, Icon, Screen, Sheet, toast, useCurrent } from '@/modules/pms/components/ui'
-import { Note, NOTE_TYPES, noteHref, useNotifications } from '@/modules/pms/notifications'
+import { AppBar, Screen, Sheet, toast, useCurrent } from '@/modules/pms/components/ui'
+import { Note, noteHref, useNotifications } from '@/modules/pms/notifications'
 
 const ICONS: Record<Note['icon'], React.ReactNode> = {
   book: (
@@ -32,7 +32,7 @@ const ICONS: Record<Note['icon'], React.ReactNode> = {
   news: <path d="M3 11v2a1 1 0 0 0 1 1h2l5 4V6L6 10H4a1 1 0 0 0-1 1zM15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13" />,
 }
 
-type Filter = 'all' | 'unread' | 'action'
+type Filter = 'all' | 'unread'
 
 const groupOf = (at: string) => {
   const d = dayjs(at)
@@ -71,15 +71,13 @@ function Linked({ text }: { text: string }) {
 export default function NotificationsPage() {
   const { place } = useCurrent()
   const navigate = useNavigate()
-  const { notes, error, off, read, unread, setOff } = useNotifications(place.id)
+  const { notes, error, read, unread } = useNotifications(place.id)
   const [filter, setFilter] = useState<Filter>('all')
   const [open, setOpen] = useState<Note>()
-  const [settings, setSettings] = useState(false)
 
   const all = notes || []
   const unreadCount = all.filter((n) => n.unread).length
-  const actionCount = all.filter((n) => n.unread && n.urgent).length
-  const shown = all.filter((n) => filter === 'all' || (n.unread && (filter === 'unread' || n.urgent)))
+  const shown = all.filter((n) => filter === 'all' || n.unread)
   const groups = ['Hôm nay', 'Hôm qua', 'Trước đó']
     .map((label) => ({ label, items: shown.filter((n) => groupOf(n.at) === label) }))
     .filter((g) => g.items.length)
@@ -99,17 +97,12 @@ export default function NotificationsPage() {
 
   return (
     <Screen>
-      <AppBar title="Thông báo" sub={unreadCount ? `${unreadCount} chưa đọc` : 'Đã đọc hết'} lead="back">
-        <button type="button" className="icon-btn" aria-label="Cài đặt thông báo" onClick={() => setSettings(true)}>
-          <Icon name="settings" />
-        </button>
-      </AppBar>
+      <AppBar title="Thông báo" sub={unreadCount ? `${unreadCount} chưa đọc` : 'Đã đọc hết'} lead="back" />
       <div className="seg nt-tabs" role="group" aria-label="Lọc thông báo">
         {(
           [
             ['all', 'Tất cả', 0],
             ['unread', 'Chưa đọc', unreadCount],
-            ['action', 'Cần xử lý', actionCount],
           ] as const
         ).map(([key, label, count]) => (
           <button key={key} type="button" aria-pressed={filter === key} onClick={() => setFilter(key)}>
@@ -131,16 +124,8 @@ export default function NotificationsPage() {
         )}
         {notes && !shown.length && (
           <div className="empty">
-            <b>
-              {filter === 'action'
-                ? 'Không có việc cần xử lý'
-                : filter === 'unread'
-                  ? 'Không có thông báo chưa đọc'
-                  : 'Chưa có thông báo'}
-            </b>
-            {filter === 'action'
-              ? 'Trùng phòng, lỗi kênh và yêu cầu chờ duyệt sẽ hiện ở đây.'
-              : 'Thông báo mới sẽ hiện ở đây.'}
+            <b>{filter === 'unread' ? 'Không có thông báo chưa đọc' : 'Chưa có thông báo'}</b>
+            Thông báo mới sẽ hiện ở đây.
           </div>
         )}
         {groups.map((g) => (
@@ -223,39 +208,6 @@ export default function NotificationsPage() {
           )}
           <button type="button" className="btn btn-block" onClick={() => setOpen(undefined)}>
             {open.announcement.kind === 'maintenance' ? 'Đã hiểu' : 'Để sau'}
-          </button>
-        </Sheet>
-      )}
-
-      {settings && (
-        <Sheet title="Cài đặt thông báo" onClose={() => setSettings(false)}>
-          <p className="help">
-            Áp dụng cho tài khoản của bạn. Bạn chỉ nhận loại thông báo mà vai trò của mình được xem.
-          </p>
-          {NOTE_TYPES.map((t) => {
-            const on = t.key === 'channel' || !off.includes(t.key)
-            return (
-              <div key={t.key} className="switch-row">
-                <div>
-                  <div className="nt-t">{t.label}</div>
-                  <p className="help">{t.sub}</p>
-                </div>
-                <button
-                  type="button"
-                  className="switch"
-                  role="switch"
-                  aria-checked={on}
-                  aria-label={t.label}
-                  disabled={t.key === 'channel'}
-                  onClick={() => setOff(on ? [...off, t.key] : off.filter((k) => k !== t.key))}
-                >
-                  <span />
-                </button>
-              </div>
-            )
-          })}
-          <button type="button" className="btn btn-primary btn-block" onClick={() => setSettings(false)}>
-            Xong
           </button>
         </Sheet>
       )}
