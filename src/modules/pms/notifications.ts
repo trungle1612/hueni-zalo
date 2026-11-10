@@ -3,7 +3,6 @@ import { useCallback, useEffect, useState } from 'react'
 import { API_URL } from '@/constants/common'
 
 import { api, ApiError } from './api'
-import { usePms } from './pms.store'
 
 // Thông báo (#71, hueni-api#213, #216): the inbox is built by hueni-api; the app only shows it and sends read marks.
 
@@ -32,17 +31,6 @@ export type Note = {
   link: { screen: string; id?: number | null } | null
   announcement: Announcement | null
 }
-
-// Cài đặt thông báo, in the design's order. channel can't be turned off.
-export const NOTE_TYPES: { key: NoteType; label: string; sub: string }[] = [
-  { key: 'book', label: 'Đặt phòng mới và huỷ', sub: 'Từ mọi kênh' },
-  { key: 'money', label: 'Tiền', sub: 'Người khác thu tiền, giao ca lệch tiền' },
-  { key: 'reg', label: 'Khai báo lưu trú', sub: 'Nhắc lúc 08:00 và 21:00 nếu còn khách chưa khai báo' },
-  { key: 'room', label: 'Buồng phòng', sub: 'Phòng dọn xong, báo hỏng' },
-  { key: 'approve', label: 'Yêu cầu chờ duyệt', sub: 'Hoàn tiền' },
-  { key: 'news', label: 'Tính năng mới và bảo trì', sub: 'Từ hueni' },
-  { key: 'channel', label: 'Trùng phòng và lỗi kênh', sub: 'Luôn bật vì có thể gây mất khách' },
-]
 
 export const noteHref = (link: Note['link']) =>
   link &&
@@ -143,7 +131,6 @@ const message = (e: unknown) => (e instanceof ApiError ? e.message : 'Không t�
 export function useNotifications(placeId: number) {
   const [notes, setNotes] = useState<Note[]>()
   const [error, setError] = useState<string>()
-  const off = (usePms((s) => s.user.notifications_off) || ['room']) as NoteType[]
 
   const load = useCallback(async () => {
     if (!API_URL) return setNotes(MOCK)
@@ -164,24 +151,11 @@ export function useNotifications(placeId: number) {
       api(`/places/${placeId}/notifications/${unread ? 'unread' : 'read'}`, { body: { keys } }).catch(() => {})
   }
 
-  // Cài đặt thông báo: hidden types disappear after the reload.
-  const setOff = async (types: NoteType[]) => {
-    usePms.setState((s) => ({ user: { ...s.user, notifications_off: types } }))
-    if (!API_URL) return setNotes(MOCK.filter((n) => n.type === 'channel' || !types.includes(n.type)))
-    try {
-      await api('/me/notifications', { method: 'PATCH', body: { off: types } })
-      await load()
-    } catch (e) {
-      setError(message(e))
-    }
-  }
-
   return {
-    notes: notes?.filter((n) => API_URL || n.type === 'channel' || !off.includes(n.type)),
+    // ponytail: announcements only, the rest of the inbox is turned off; drop this filter to bring it back (#71).
+    notes: notes?.filter((n) => n.announcement),
     error,
-    off,
     read: (keys: string[]) => mark(keys, false),
     unread: (keys: string[]) => mark(keys, true),
-    setOff,
   }
 }
