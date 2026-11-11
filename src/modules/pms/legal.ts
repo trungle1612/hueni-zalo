@@ -1,9 +1,9 @@
 // Điều khoản sử dụng + Chính sách bảo mật, shown in-app (Zalo CP §4.1, §4.8).
-// ponytail: draft adapted from the design's Legal board; [placeholders] are the owner's legal data and block
-// release (#57). Changing a text means a new TERMS_VERSION: everyone is asked to agree again.
+// Lists only the data and permissions the app really uses (#80); paste the terms into the Zalo console too.
+// Changing a text means a new TERMS_VERSION: everyone is asked to agree again.
 
 // Date of the texts below, sent to hueni-api when the user agrees (hueni-api #206).
-export const TERMS_VERSION = '2026-11-06'
+export const TERMS_VERSION = '2026-11-11'
 
 export type Doc = 'terms' | 'privacy'
 type Text = { label: string; summary: string[]; sections: { title: string; paras: string[] }[] }
@@ -57,14 +57,14 @@ export const LEGAL: Record<Doc, Text> = {
         title: 'Gián đoạn và giới hạn trách nhiệm',
         paras: [
           'Chúng tôi cố gắng giữ dịch vụ chạy liên tục và báo trước khi bảo trì. Dịch vụ có thể gián đoạn do sự cố của Zalo, nhà mạng, kênh OTA hoặc sự kiện bất khả kháng.',
-          'Trong phạm vi pháp luật cho phép, trách nhiệm bồi thường của chúng tôi không vượt quá phí dịch vụ cơ sở đã trả trong [12] tháng gần nhất.',
+          'Trong phạm vi pháp luật cho phép, trách nhiệm bồi thường của chúng tôi không vượt quá phí dịch vụ cơ sở đã trả trong 12 tháng gần nhất.',
         ],
       },
       {
         title: 'Tạm ngưng và chấm dứt',
         paras: [
           'Chúng tôi có thể tạm ngưng tài khoản vi phạm điều khoản sau khi đã báo trước, trừ trường hợp khẩn cấp hoặc theo yêu cầu của cơ quan có thẩm quyền.',
-          'Khi chấm dứt dịch vụ, chủ cơ sở có [30] ngày để lấy dữ liệu. Sau đó dữ liệu bị xoá, trừ phần pháp luật yêu cầu lưu giữ.',
+          'Khi chấm dứt dịch vụ, chủ cơ sở có 30 ngày để lấy dữ liệu. Sau đó dữ liệu bị xoá, trừ phần pháp luật yêu cầu lưu giữ.',
         ],
       },
       {
@@ -78,7 +78,7 @@ export const LEGAL: Record<Doc, Text> = {
   privacy: {
     label: 'Chính sách bảo mật',
     summary: [
-      'Từ Zalo, hueni lấy tên, ảnh đại diện và số điện thoại (khi bạn cho phép, để liên kết tài khoản).',
+      'Từ Zalo, hueni chỉ lấy tên và mã tài khoản Zalo của bạn.',
       'Không đọc tin nhắn, danh bạ Zalo. Không bán dữ liệu. Không dùng dữ liệu để quảng cáo.',
       'Với dữ liệu khách lưu trú, cơ sở là bên quyết định; hueni chỉ xử lý theo yêu cầu của cơ sở.',
       'Bạn có quyền xem, sửa, xoá dữ liệu và rút lại sự đồng ý.',
@@ -94,8 +94,7 @@ export const LEGAL: Record<Doc, Text> = {
       {
         title: 'Dữ liệu chúng tôi thu thập',
         paras: [
-          'Tên, ảnh đại diện và mã tài khoản Zalo: lấy từ Zalo khi bạn đăng nhập, để hiện trong danh sách nhân viên, giao ca, nhật ký.',
-          'Số điện thoại Zalo: chỉ khi bạn cho phép, để tìm tài khoản chủ cơ sở đã thêm cho bạn.',
+          'Tên và mã tài khoản Zalo: lấy từ Zalo khi bạn đăng nhập, để hiện trong danh sách nhân viên, giao ca, nhật ký.',
           'Đăng ký chủ cơ sở: họ tên, số điện thoại, tên homestay, link Google Maps, để xác minh trước khi duyệt.',
           'Dữ liệu khách lưu trú do cơ sở nhập: họ tên, số điện thoại, ngày ở, tiền thu, để quản lý đặt phòng và thu tiền.',
           'Thanh toán: chỉ số tiền và hình thức. Không lưu số thẻ ngân hàng.',
@@ -113,15 +112,15 @@ export const LEGAL: Record<Doc, Text> = {
       {
         title: 'Chia sẻ với ai',
         paras: [
-          'Chỉ phần cần thiết cho: Zalo (đăng nhập), kênh bán phòng mà cơ sở tự kết nối, nhà cung cấp máy chủ [HyperCore].',
+          'Chỉ phần cần thiết cho: Zalo (đăng nhập), kênh bán phòng mà cơ sở tự kết nối, nhà cung cấp máy chủ HyperCore.',
           'Cơ quan nhà nước có thẩm quyền khi pháp luật yêu cầu.',
-          'Dữ liệu được lưu tại [HyperCore].',
+          'Dữ liệu được lưu tại HyperCore.',
         ],
       },
       {
         title: 'Lưu trữ bao lâu',
         paras: [
-          'Dữ liệu tài khoản: khi bạn còn dùng dịch vụ; xoá trong [30] ngày sau khi tài khoản bị xoá.',
+          'Dữ liệu tài khoản: khi bạn còn dùng dịch vụ; xoá trong 30 ngày sau khi tài khoản bị xoá.',
           'Đặt phòng, tiền thu và nhật ký của cơ sở: giữ lại khi một nhân viên xoá tài khoản, vì thuộc về cơ sở.',
         ],
       },
@@ -129,8 +128,8 @@ export const LEGAL: Record<Doc, Text> = {
         title: 'Quyền của bạn',
         paras: [
           'Bạn có quyền được biết, đồng ý hoặc rút lại sự đồng ý, xem, sửa, xoá dữ liệu, phản đối hoặc hạn chế xử lý, khiếu nại.',
-          'Rút lại sự đồng ý không ảnh hưởng việc xử lý đã làm trước đó. Sau khi rút, bạn không thể tiếp tục dùng hueni.',
-          'Gửi yêu cầu qua [0794521276].',
+          'Rút lại sự đồng ý không ảnh hưởng việc xử lý đã làm trước đó. Khi bạn thu hồi quyền của hueni trong Zalo, tài khoản hueni của bạn bị xoá, giống như Xoá tài khoản.',
+          'Gửi yêu cầu qua 0794521276.',
         ],
       },
       {
