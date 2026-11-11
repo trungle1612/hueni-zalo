@@ -225,7 +225,7 @@ export default function LoginPage() {
               <li>
                 <Icon name="user" stroke={1.75} />
                 <div>
-                  <b>Tên và ảnh đại diện · lấy từ Zalo</b>
+                  <b>Tên và mã tài khoản · lấy từ Zalo</b>
                   <span>Hiện trong danh sách nhân viên, giao ca và nhật ký thao tác.</span>
                 </div>
               </li>
