@@ -172,7 +172,7 @@ function TabBar({ active }: { active: TabKey }) {
   )
 }
 
-// One screen: app bar, scroll area, then tab bar or a fixed action bar. Signed-out users go to Đăng nhập.
+// One screen: app bar, scroll area, then tab bar or a fixed action bar. Signed-out users go to Liên kết tài khoản.
 export function Screen({
   children,
   tab,

@@ -309,7 +309,7 @@ function PersonSheet({
         )
       )}
       <button type="button" className="btn btn-block" onClick={() => confirm('link')}>
-        {ask === 'link' ? 'Xác nhận tạo link mới' : 'Tạo link đăng nhập mới'}
+        {ask === 'link' ? 'Xác nhận tạo link mới' : 'Tạo link liên kết mới'}
       </button>
       <button type="button" className="btn btn-danger btn-block" onClick={() => confirm('remove')}>
         {ask === 'remove' ? 'Xác nhận xoá' : 'Xoá khỏi cơ sở'}
@@ -325,7 +325,7 @@ function PersonSheet({
 function CodeSheet({ invite, onClose }: { invite: Invite; onClose: () => void }) {
   const { place } = useCurrent()
   const until = fmtDate(invite.expires_at)
-  const text = `Mã mời vào hueni (${place.name}): ${invite.code}\nMở hueni trên Zalo, bấm Đăng nhập bằng Zalo rồi nhập mã. Hết hạn ${until}.`
+  const text = `Mã mời vào hueni (${place.name}): ${invite.code}\nMở hueni trên Zalo, bấm Liên kết tài khoản rồi nhập mã. Hết hạn ${until}.`
   const copy = () =>
     navigator.clipboard
       .writeText(invite.code)
@@ -338,7 +338,7 @@ function CodeSheet({ invite, onClose }: { invite: Invite; onClose: () => void })
         {invite.code}
       </p>
       <p className="help">
-        Nhân viên mở hueni trên Zalo, bấm Đăng nhập bằng Zalo rồi nhập mã này. Dùng {invite.uses_left} lần, hết hạn{' '}
+        Nhân viên mở hueni trên Zalo, bấm Liên kết tài khoản rồi nhập mã này. Dùng {invite.uses_left} lần, hết hạn{' '}
         {until}. Chỉ gửi cho đúng người.
       </p>
       <button
@@ -369,10 +369,10 @@ function LinkSheet({ name, url, onClose }: { name: string; url: string; onClose:
   return (
     <Sheet title={`Gửi link cho ${name}`} onClose={onClose}>
       <p className="help">
-        {name} mở link để liên kết Zalo, rồi đăng nhập mini app bằng Zalo. Link dùng một lần, hết hạn sau 7 ngày. Chỉ
-        gửi cho đúng người.
+        {name} mở link để liên kết Zalo, rồi bấm Liên kết tài khoản trong hueni. Link dùng một lần, hết hạn sau 7 ngày.
+        Chỉ gửi cho đúng người.
       </p>
-      <Field label="Link đăng nhập">
+      <Field label="Link liên kết">
         {(p) => <input {...p} readOnly value={url} onFocus={(e) => e.target.select()} />}
       </Field>
       <button
