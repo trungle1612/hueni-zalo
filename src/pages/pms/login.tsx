@@ -76,7 +76,7 @@ export default function LoginPage() {
     } catch (e) {
       // not_registered opens the linking step (Đăng ký chủ nhà).
       if (e instanceof ApiError && e.code === 'not_registered') return
-      setError(e instanceof ApiError ? e.message : 'Zalo chưa cho phép đăng nhập. Thử lại.')
+      setError(e instanceof ApiError ? e.message : 'Zalo chưa cho phép liên kết tài khoản. Thử lại.')
     } finally {
       setWaiting(false)
     }
@@ -172,10 +172,10 @@ export default function LoginPage() {
             </>
           ) : (
             <>
-              <h1>Đăng nhập</h1>
+              <h1>Liên kết tài khoản</h1>
               <p>
-                hueni dành cho chủ cơ sở lưu trú và nhân viên của họ. Đăng nhập để hueni biết bạn thuộc cơ sở nào và chỉ
-                cho bạn thấy dữ liệu của cơ sở đó.
+                hueni dành cho chủ cơ sở lưu trú và nhân viên của họ. Liên kết tài khoản Zalo để hueni biết bạn thuộc cơ
+                sở nào và chỉ cho bạn thấy dữ liệu của cơ sở đó.
               </p>
               <button
                 type="button"
@@ -185,7 +185,7 @@ export default function LoginPage() {
                 onClick={agreed ? zalo : () => setIntro('pre')}
               >
                 {waiting ? <Spinner /> : <img src={zaloIcon} alt="" width={28} height={28} />}
-                {waiting ? 'Đang chờ Zalo xác nhận…' : 'Đăng nhập bằng Zalo'}
+                {waiting ? 'Đang chờ Zalo xác nhận…' : 'Liên kết tài khoản'}
               </button>
               <button type="button" className="btn btn-ghost link" onClick={() => setIntro('info')}>
                 <Icon name="lock" size={16} />
@@ -220,7 +220,7 @@ export default function LoginPage() {
       ) : (
         intro && (
           <Sheet className="dialog" title="hueni cần thông tin của bạn" onClose={() => setIntro(undefined)}>
-            <p>Đăng nhập bằng cách xác nhận trên Zalo.</p>
+            <p>Liên kết tài khoản bằng cách xác nhận trên Zalo.</p>
             <ul>
               <li>
                 <Icon name="user" stroke={1.75} />
@@ -345,7 +345,7 @@ function Register({
             <p>
               {sent.status === 'rejected'
                 ? 'Kiểm tra lại thông tin rồi gửi lại.'
-                : `hueni sẽ gọi số ${sent.phone_number} để xác minh. Duyệt xong, bấm Đăng nhập bằng Zalo lần nữa.`}
+                : `hueni sẽ gọi số ${sent.phone_number} để xác minh. Duyệt xong, bấm Liên kết tài khoản lần nữa.`}
             </p>
             <button type="button" className="btn btn-primary btn-block" onClick={() => setEditing(true)}>
               {sent.status === 'rejected' ? 'Gửi lại' : 'Sửa thông tin'}
